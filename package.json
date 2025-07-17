@@ -1,0 +1,17 @@
+{
+  "name": "rekognition-backend",
+  "version": "1.0.0",
+  "description": "Backend for face recognition project using AWS Rekognition",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "aws-sdk": "^2.1410.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.0.3",
+    "express": "^4.18.2",
+    "multer": "^1.4.5-lts.1"
+  }
+}
