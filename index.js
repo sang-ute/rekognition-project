@@ -14,6 +14,8 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const PORT = 3001;
 
+const checkedInUsers = new Set();
+
 AWS.config.update({
   accessKeyId: process.env.AWS_ACCESS_KEY_ID,
   secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
@@ -99,6 +101,7 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
     if (result.FaceMatches.length > 0) {
       const matchedFace = result.FaceMatches[0].Face;
       const name = matchedFace.ExternalImageId;
+      checkedInUsers.add(name);
       res.json({ success: true, name });
     } else {
       res.json({ success: false, message: "No match found" });
@@ -107,6 +110,10 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
     console.error("Check-in error:", err);
     res.status(500).json({ success: false, error: err.message });
   }
+});
+
+app.get("/attendance", (req, res) => {
+  res.json({ success: true, checkedIn: Array.from(checkedInUsers) });
 });
 
 app.get("/list-collections", async (req, res) => {

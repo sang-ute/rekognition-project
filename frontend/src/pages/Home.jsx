@@ -42,7 +42,7 @@ function Home() {
               Welcome to the face "rekognition" website
             </Typography>
           </Box>
-          <Stack direction="row" spacing={2} justifyContent="center" width="100%" mt={2}>
+          <Stack direction="column" spacing={2} justifyContent="center" width="100%" mt={2}>
             <Button
               component={Link}
               to="/checkin"
@@ -62,6 +62,16 @@ function Home() {
               sx={{ flex: 1 }}
             >
               Register new faces
+            </Button>
+            <Button
+              component={Link}
+              to="/dashboard"
+              variant="outlined"
+              color="secondary"
+              size="large"
+              sx={{ flex: 1 }}
+            >
+              View Dashboard
             </Button>
           </Stack>
         </CardContent>

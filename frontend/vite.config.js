@@ -8,6 +8,8 @@ export default defineConfig({
     proxy: {
       "/checkin": "http://localhost:3001",
       "/index-face": "http://localhost:3001",
+      "/attendance": "http://localhost:3001",
+      "/list-collections": "http://localhost:3001",
     },
   },
 });
