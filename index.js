@@ -123,15 +123,24 @@ app.get("/list-collections", async (req, res) => {
       CollectionId: process.env.REKOGNITION_COLLECTION,
       MaxResults: 10,
     };
-    const data = await rekognition.listFaces(params).promise();
+    let data = await rekognition.listFaces(params).promise();
     faces = faces.concat(data.Faces);
+
     while (data.NextToken) {
       params.NextToken = data.NextToken;
-      const nextData = await rekognition.listFaces(params).promise();
-      faces = faces.concat(nextData.Faces);
-      data.NextToken = nextData.NextToken;
+      data = await rekognition.listFaces(params).promise();
+      faces = faces.concat(data.Faces);
     }
-    res.json({ success: true, faces });
+
+    // Attach s3Key using ImageId (if you used that for S3 key)
+    const processedFaces = faces.map((face) => ({
+      FaceId: face.FaceId,
+      ExternalImageId: face.ExternalImageId,
+      ImageId: face.ImageId, // this matches the Key used when indexing
+      s3Key: `faces/${face.ImageId}`, // assuming this structure
+    }));
+
+    res.json({ success: true, faces: processedFaces });
   } catch (err) {
     console.error("Error listing faces:", err);
     return res.status(500).json({ success: false, error: err.message });
@@ -140,6 +149,38 @@ app.get("/list-collections", async (req, res) => {
 
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "frontend/dist", "index.html"));
+});
+app.delete("/delete-face", express.json(), async (req, res) => {
+  const { faceId, s3Key } = req.body;
+
+  if (!faceId || !s3Key) {
+    return res
+      .status(400)
+      .json({ success: false, error: "Missing faceId or s3Key" });
+  }
+
+  try {
+    // 1. Delete from Rekognition
+    await rekognition
+      .deleteFaces({
+        CollectionId: process.env.REKOGNITION_COLLECTION,
+        FaceIds: [faceId],
+      })
+      .promise();
+
+    // 2. Delete from S3
+    await s3
+      .deleteObject({
+        Bucket: process.env.S3_BUCKET,
+        Key: s3Key,
+      })
+      .promise();
+
+    res.json({ success: true, message: "Face and image deleted successfully" });
+  } catch (err) {
+    console.error("Error deleting face:", err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 app.listen(PORT, () => {
