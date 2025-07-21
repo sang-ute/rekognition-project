@@ -45,7 +45,7 @@ function Home() {
           <Stack direction="column" spacing={2} justifyContent="center" width="100%" mt={2}>
             <Button
               component={Link}
-              to="/checkin"
+              to="/liveness-quickstart"
               variant="contained"
               color="primary"
               size="medium"
