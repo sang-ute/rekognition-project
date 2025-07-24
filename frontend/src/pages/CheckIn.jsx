@@ -6,26 +6,40 @@ import {
   Typography,
   Stack,
   CircularProgress,
+  Paper,
+  Alert,
 } from "@mui/material";
+// Assuming FaceLivenessDetector is from a library like AWS Amplify or a custom component
+// import { FaceLivenessDetector } from '@aws-amplify/ui-react'; // Uncomment if using Amplify
+// For this example, we'll mock it as a placeholder
+const FaceLivenessDetector = ({ sessionId, region, onAnalysisComplete, onError }) => {
+  useEffect(() => {
+    // Mock liveness detection simulation
+    const timer = setTimeout(() => {
+      onAnalysisComplete({ Confidence: 95 }); // Mock success
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [onAnalysisComplete]);
+  return <Typography>Performing liveness detection...</Typography>;
+};
 
 function CheckIn() {
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [livenessSessionId, setLivenessSessionId] = useState(null);
 
   useEffect(() => {
     async function startVideo() {
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({
-          video: true,
-        });
+        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
         }
       } catch (err) {
         console.error("Error accessing webcam:", err);
-        setMessage("Failed to access webcam");
+        setMessage("Failed to access webcam. Please ensure camera permissions are granted.");
       }
     }
     startVideo();
@@ -48,9 +62,7 @@ function CheckIn() {
     canvas.getContext("2d").drawImage(video, 0, 0, canvas.width, canvas.height);
 
     try {
-      const blob = await new Promise((resolve) =>
-        canvas.toBlob(resolve, "image/jpeg")
-      );
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg"));
       const formData = new FormData();
       formData.append("photo", blob, "checkin.jpg");
 
@@ -60,13 +72,9 @@ function CheckIn() {
       });
       const result = await response.json();
 
-      if (result.success) {
-        setMessage("Check-in successful");
-      } else {
-        setMessage(result.message || "No match found");
-      }
+      setMessage(result.success ? "Check-in successful!" : result.message || "No match found");
     } catch (err) {
-      setMessage("Error during check-in: " + err.message);
+      setMessage(`Error during check-in: ${err.message}`);
     } finally {
       setIsLoading(false);
     }
@@ -86,80 +94,152 @@ function CheckIn() {
         throw new Error("No session ID received");
       }
     } catch (err) {
-      setMessage("Failed to start liveness session: " + err.message);
-    } finally {
+      setMessage(`Failed to start liveness session: ${err.message}`);
       setIsLoading(false);
     }
   };
 
   return (
-    <Box
+    <Box>
       minHeight="100vh"
       display="flex"
       flexDirection="column"
       justifyContent="center"
       alignItems="center"
-      bgcolor="#f5f5f5"
-    >
-      <Typography variant="h4" gutterBottom>
-        Check-In Camera
-      </Typography>
-      <Box mb={2}>
-        <video
-          ref={videoRef}
-          autoPlay
-          style={{ width: "100%", maxWidth: "600px" }}
-        />
-        <canvas ref={canvasRef} style={{ display: "none" }} />
-      </Box>
-      {message && (
+      bgcolor="#f0f2f5"
+      px={{ xs: 2, sm: 4 }}
+      py={4}
+      <Paper
+        elevation={6}
+        sx={{
+          p: { xs: 2, sm: 4 },
+          width: "100%",
+          maxWidth: 600,
+          borderRadius: 2,
+          bgcolor: "white",
+        }}
+      >
         <Typography
-          variant="body1"
-          color={message.includes("Error") ? "error" : "text.primary"}
-          mb={2}
+          variant="h4"
+          align="center"
+          gutterBottom
+          sx={{ fontWeight: "bold", color: "#1976d2" }}
         >
-          {message}
+          Face Check-In
         </Typography>
-      )}
-      <Stack direction="row" spacing={2}>
-        <Button
-          variant="contained"
-          color="primary"
-          onClick={captureAndCheckIn}
-          disabled={isLoading}
+
+        <Box
+          my={3}
+          sx={{
+            position: "relative",
+            width: "100%",
+            aspectRatio: "4/3", // Maintain aspect ratio for video
+            bgcolor: "#000",
+            borderRadius: "8px",
+            overflow: "hidden",
+          }}
         >
-          {isLoading ? <CircularProgress size={24} /> : "Check In"}
-        </Button>
-        <Button>
-          variant="contained" color="primary" onclick=
-          {livenessSessionId && (
-            <Box mt={4} width="100%" maxWidth="600px">
-              <FaceLivenessDetector
-                sessionId={livenessSessionId}
-                region="us-east-1" // replace with your actual region
-                onAnalysisComplete={(result) => {
-                  console.log("Liveness Result:", result);
-                  if (result?.Confidence && result.Confidence > 90) {
-                    setMessage("Liveness confirmed with high confidence.");
-                  } else {
-                    setMessage("Liveness result not confident.");
-                  }
-                  setLivenessSessionId(null); // hide detector after finish
-                }}
-                onError={(err) => {
-                  console.error("Liveness error:", err);
-                  setMessage("Liveness detection failed: " + err.message);
-                  setLivenessSessionId(null);
-                }}
-              />
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            aria-label="Webcam feed for face check-in"
+            style={{
+              width: "100%",
+              height: "100%",
+              objectFit: "cover",
+            }}
+          />
+          <canvas ref={canvasRef} style={{ display: "none" }} />
+          {isLoading && (
+            <Box
+              sx={{
+                position: "absolute",
+                top: 0,
+                left: 0,
+                right: 0,
+                bottom: 0,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                bgcolor: "rgba(0,0,0,0.5)",
+              }}
+            >
+              <CircularProgress color="primary" />
             </Box>
           )}
-          disabled={isLoading}
-        </Button>
-        <Button component={Link} to="/" variant="outlined" color="primary">
-          Back to Home
-        </Button>
-      </Stack>
+        </Box>
+
+        {message && (
+          <Alert
+            severity={message.includes("Error") || message.includes("Failed") ? "error" : "success"}
+            sx={{ my: 2 }}
+          >
+            {message}
+          </Alert>
+        )}
+
+        <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="center" mb={3}>
+          <Button
+            variant="contained"
+            color="primary"
+            onClick={captureAndCheckIn}
+            disabled={isLoading || livenessSessionId}
+            aria-label="Perform face check-in"
+            sx={{ py: 1.5, fontSize: "1rem" }}
+          >
+            {isLoading ? <CircularProgress size={24} color="inherit" /> : "Check In"}
+          </Button>
+
+          <Button
+            variant="contained"
+            color="secondary"
+            onClick={handleLivenessDetection}
+            disabled={isLoading || livenessSessionId}
+            aria-label="Start liveness detection"
+            sx={{ py: 1.5, fontSize: "1rem" }}
+          >
+            {isLoading ? <CircularProgress size={24} color="inherit" /> : "Start Liveness Check"}
+          </Button>
+
+          <Button
+            variant="outlined"
+            color="primary"
+            component={Link}
+            to="/"
+            disabled={isLoading}
+            aria-label="Return to home page"
+            sx={{ py: 1.5, fontSize: "1rem" }}
+          >
+            Back to Home
+          </Button>
+        </Stack>
+
+        {livenessSessionId && (
+          <Box mt={3}>
+            <FaceLivenessDetector
+              sessionId={livenessSessionId}
+              region="us-east-1"
+              onAnalysisComplete={(result) => {
+                console.log("Liveness Result:", result);
+                setMessage(
+                  result?.Confidence && result.Confidence > 90
+                    ? "Liveness confirmed with high confidence."
+                    : "Liveness result not confident."
+                );
+                setLivenessSessionId(null);
+                setIsLoading(false);
+              }}
+              onError={(err) => {
+                console.error("Liveness error:", err);
+                setMessage(`Liveness detection failed: ${err.message}`);
+                setLivenessSessionId(null);
+                setIsLoading(false);
+              }}
+            />
+          </Box>
+        )}
+      </Paper>
     </Box>
   );
 }
