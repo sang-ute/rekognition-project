@@ -209,23 +209,6 @@ const NoLivenessResult = ({ reason, onRetry }) => (
 // ---------- Styles ----------
 
 const styles = {
-  centered: {
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    justifyContent: "center",
-    height: "100vh",
-    padding: "20px",
-    textAlign: "center",
-  },
-  fullScreen: {
-    position: "relative",
-    width: "100%",
-    height: "100vh",
-    display: "flex",
-    justifyContent: "center",
-    alignItems: "center",
-  },
   successBox: {
     backgroundColor: "#28a745",
     color: "white",
