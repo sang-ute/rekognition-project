@@ -2,6 +2,7 @@ import React from "react";
 import { FaceLivenessDetector } from "@aws-amplify/ui-react-liveness";
 import { Loader, ThemeProvider } from "@aws-amplify/ui-react";
 import "@aws-amplify/ui-react/styles.css";
+import { useNavigate } from "react-router-dom";
 
 export function LivenessQuickStartReact() {
   const [loading, setLoading] = React.useState(true);
@@ -9,6 +10,7 @@ export function LivenessQuickStartReact() {
   const [analysisComplete, setAnalysisComplete] = React.useState(false);
   const [livenessResult, setLivenessResult] = React.useState(null);
   const [analysisLoading, setAnalysisLoading] = React.useState(false);
+  const navigate = useNavigate();
 
   const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
 
@@ -59,23 +61,15 @@ export function LivenessQuickStartReact() {
         },
       });
 
-      console.log(response)
-
       const json = await response.json();
-      console.log("Raw response:", json);
-
-      // Defensive parsing
-    //   let data;
-    //   try {
-    //     data = JSON.parse(text);
-    //   } catch (jsonErr) {
-    //     throw new Error(`Expected JSON but got: ${text.slice(0, 10000000000000)}...`);
-    //   }
-
       console.log("Analysis results:", json);
 
       setLivenessResult(json);
       setAnalysisComplete(true);
+
+      if (json.isLive) {
+        await performCheckIn(json.sessionId);
+      }
     } catch (error) {
       console.error("Error fetching liveness session data:", error);
       setLivenessResult({
@@ -85,6 +79,54 @@ export function LivenessQuickStartReact() {
       setAnalysisComplete(true);
     } finally {
       setAnalysisLoading(false);
+    }
+  };
+
+  const performCheckIn = async (sessionId) => {
+    try {
+      // Fetch the reference image from the liveness session (assumed to be in S3)
+      const s3Key = `rekognition-output/${sessionId}/reference-image.jpg`; // Adjust based on your S3 structure
+      const imageUrl = await getS3ImageUrl(s3Key);
+
+      // Download the image as a blob
+      const imageResponse = await fetch(imageUrl);
+      const imageBlob = await imageResponse.blob();
+
+      // Prepare form data for check-in endpoint
+      const formData = new FormData();
+      formData.append("photo", imageBlob, "checkin.jpg");
+
+      // Send to /checkin endpoint
+      const checkInResponse = await fetch(`${apiBaseUrl}/checkin`, {
+        method: "POST",
+        body: formData,
+      });
+
+      const checkInResult = await checkInResponse.json();
+
+      if (checkInResult.success) {
+        console.log(`Check-in successful for ${checkInResult.name}`);
+        navigate("/dashboard"); // Navigate to Dashboard on success
+      } else {
+        console.log("No match found during check-in");
+      }
+    } catch (error) {
+      console.error("Error during check-in:", error);
+    }
+  };
+
+  const getS3ImageUrl = async (s3Key) => {
+    try {
+      const response = await fetch(`${apiBaseUrl}/get-s3-url?key=${encodeURIComponent(s3Key)}`);
+      const data = await response.json();
+      if (data.success) {
+        return data.url;
+      } else {
+        throw new Error("Failed to get S3 URL");
+      }
+    } catch (error) {
+      console.error("Error getting S3 URL:", error);
+      throw error;
     }
   };
 
@@ -106,7 +148,7 @@ export function LivenessQuickStartReact() {
           ) : livenessResult?.error ? (
             <FailureResult message={livenessResult.message} onRetry={handleRetry} />
           ) : livenessResult?.isLive ? (
-            <SuccessResult confidence={livenessResult.confidence} />
+            <SuccessResult confidence={livenessResult.confidence} onContinue={() => navigate("/dashboard")} />
           ) : (
             <NoLivenessResult reason={livenessResult?.reason} onRetry={handleRetry} />
           )}
@@ -136,7 +178,7 @@ export function LivenessQuickStartReact() {
         <div style={styles.fullScreen}>
           <FaceLivenessDetector
             sessionId={createLivenessApiData.sessionId}
-            region="us-east-1"  
+            region="us-east-1"
             onAnalysisComplete={handleAnalysisComplete}
             onError={(error) => console.error("Liveness detection error:", error)}
             components={{
@@ -169,20 +211,15 @@ const FailureResult = ({ message, onRetry }) => (
   </>
 );
 
-const SuccessResult = ({ confidence }) => (
+const SuccessResult = ({ confidence, onContinue }) => (
   <>
     <div style={styles.successBox}>
       <h2>Liveness Verified!</h2>
       <p>You have been successfully verified as a live person.</p>
       {confidence && <p>Confidence: {(confidence * 100).toFixed(1)}%</p>}
     </div>
-    <button
-      style={styles.primaryButton}
-      onClick={(
-
-      ) => console.log("Proceeding to dashboard...")}
-    >
-      Continue
+    <button style={styles.primaryButton} onClick={onContinue}>
+      Continue to Dashboard
     </button>
   </>
 );
@@ -211,6 +248,17 @@ const NoLivenessResult = ({ reason, onRetry }) => (
 // ---------- Styles ----------
 
 const styles = {
+  centered: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    height: "100vh",
+  },
+  fullScreen: {
+    width: "100vw",
+    height: "100vh",
+  },
   successBox: {
     backgroundColor: "#28a745",
     color: "white",

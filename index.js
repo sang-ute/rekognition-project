@@ -81,8 +81,6 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
 
         const listResult = await s3.listObjectsV2(listParams).promise();
 
-        console.log("HELLO ");
-
         // Find the reference image (usually ends with reference-image.jpg or similar)
         const referenceImageObj = listResult.Contents.find(
           (obj) => obj.Key.includes("reference") || obj.Key.includes("image")
