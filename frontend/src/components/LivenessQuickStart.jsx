@@ -160,7 +160,7 @@ export function LivenessQuickStartReact() {
 const FailureResult = ({ message, onRetry }) => (
   <>
     <div style={styles.errorBox}>
-      <h2>❌ Verification Failed</h2>
+      <h2>Verification Failed</h2>
       <p>{message}</p>
     </div>
     <button style={styles.primaryButton} onClick={onRetry}>
@@ -172,13 +172,15 @@ const FailureResult = ({ message, onRetry }) => (
 const SuccessResult = ({ confidence }) => (
   <>
     <div style={styles.successBox}>
-      <h2>✅ Liveness Verified!</h2>
+      <h2>Liveness Verified!</h2>
       <p>You have been successfully verified as a live person.</p>
       {confidence && <p>Confidence: {(confidence * 100).toFixed(1)}%</p>}
     </div>
     <button
       style={styles.primaryButton}
-      onClick={() => console.log("Proceeding to dashboard...")}
+      onClick={(
+
+      ) => console.log("Proceeding to dashboard...")}
     >
       Continue
     </button>
@@ -188,7 +190,7 @@ const SuccessResult = ({ confidence }) => (
 const NoLivenessResult = ({ reason, onRetry }) => (
   <>
     <div style={styles.warningBox}>
-      <h2>⚠️ Liveness Not Detected</h2>
+      <h2>Liveness Not Detected</h2>
       <p>We couldn't verify that you're a live person. Please try again.</p>
       {reason && <p><strong>Reason:</strong> {reason}</p>}
     </div>

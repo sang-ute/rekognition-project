@@ -381,31 +381,50 @@ app.delete("/delete-face", express.json(), async (req, res) => {
 });
 
 // Alternative simpler endpoint if you just want to check liveness without face matching
-app.get("/liveness-check/:sessionId", async (req, res) => {
-  const { sessionId } = req.params;
-
+app.get("/liveness-result/:sessionId", async (req, res) => {
   try {
-    const command = new GetFaceLivenessSessionResultsCommand({
-      SessionId: sessionId,
-    });
+    const { sessionId } = req.params;
 
-    const result = await client.send(command);
+    // Analyze liveness result from AWS SDK
+    const livenessResult = await analyzeLiveness(sessionId); // <- Your existing function
+    const { isLive, confidence, imageBytes } = livenessResult;
 
-    const isLive = result.Status === "SUCCEEDED" && result.Confidence > 90;
+    let faceMatch = null;
+
+    if (imageBytes) {
+      const matchParams = {
+        CollectionId: process.env.REKOGNITION_COLLECTION,
+        Image: { Bytes: imageBytes },
+        FaceMatchThreshold: 90,
+        MaxFaces: 1,
+      };
+
+      const rekognitionResult = await rekognition
+        .searchFacesByImage(matchParams)
+        .promise();
+
+      if (rekognitionResult.FaceMatches.length > 0) {
+        const matchedFace = rekognitionResult.FaceMatches[0].Face;
+        faceMatch = {
+          found: true,
+          name: matchedFace.ExternalImageId,
+          confidence: matchedFace.Confidence,
+        };
+      } else {
+        faceMatch = { found: false };
+      }
+    }
 
     res.json({
       success: true,
-      isLive: isLive,
-      confidence: result.Confidence / 100,
-      status: result.Status,
-      auditImages: result.AuditImages || [],
+      isLive,
+      confidence,
+      faceMatch,
+      message: isLive ? "Liveness verified" : "Liveness check failed",
     });
-  } catch (error) {
-    console.error("Error checking liveness:", error);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-    });
+  } catch (err) {
+    console.error("Liveness + Match error:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -468,6 +487,46 @@ app.post("/match-after-liveness", upload.single("photo"), async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+app.post(
+  "/check-face",
+  express.raw({ type: "application/octet-stream", limit: "5mb" }),
+  async (req, res) => {
+    try {
+      const imageBuffer = req.body;
+
+      if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
+        return res
+          .status(400)
+          .json({ success: false, message: "Invalid image data." });
+      }
+
+      const params = {
+        CollectionId: process.env.REKOGNITION_COLLECTION,
+        Image: { Bytes: imageBuffer },
+        FaceMatchThreshold: 90,
+        MaxFaces: 1,
+      };
+
+      const result = await rekognition.searchFacesByImage(params).promise();
+
+      if (result.FaceMatches && result.FaceMatches.length > 0) {
+        const matched = result.FaceMatches[0];
+
+        res.json({
+          success: true,
+          name: matched.Face.ExternalImageId || "Unknown",
+          similarity: matched.Similarity,
+          faceId: matched.Face.FaceId,
+        });
+      } else {
+        res.json({ success: false, message: "No matching face found." });
+      }
+    } catch (err) {
+      console.error("Error in /check-face:", err);
+      res.status(500).json({ success: false, error: err.message });
+    }
+  }
+);
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
