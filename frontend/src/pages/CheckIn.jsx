@@ -9,18 +9,42 @@ import {
   Paper,
   Alert,
 } from "@mui/material";
-// Assuming FaceLivenessDetector is from a library like AWS Amplify or a custom component
-// import { FaceLivenessDetector } from '@aws-amplify/ui-react'; // Uncomment if using Amplify
-// For this example, we'll mock it as a placeholder
+
+// Mock FaceLivenessDetector
 const FaceLivenessDetector = ({ sessionId, region, onAnalysisComplete, onError }) => {
   useEffect(() => {
-    // Mock liveness detection simulation
     const timer = setTimeout(() => {
-      onAnalysisComplete({ Confidence: 95 }); // Mock success
+      onAnalysisComplete({ Confidence: 95 });
     }, 2000);
     return () => clearTimeout(timer);
   }, [onAnalysisComplete]);
   return <Typography>Performing liveness detection...</Typography>;
+};
+
+// ImagePreview component to display captured image
+const ImagePreview = ({ capturedImage, title = "Captured Image" }) => {
+  if (!capturedImage?.found) return null;
+  return (
+    <Box sx={{ mt: 2, p: 2, bgcolor: "#f8f9fa", borderRadius: 2, border: "2px solid #dee2e6", maxWidth: 400, textAlign: "center" }}>
+      <Typography variant="h6" sx={{ mb: 1, color: "#495057" }}>{title}</Typography>
+      {capturedImage.previewUrl && (
+        <Box sx={{ mb: 1, display: "flex", justifyContent: "center" }}>
+          <img
+            src={capturedImage.previewUrl}
+            alt="Captured face"
+            style={{ maxWidth: "300px", maxHeight: "300px", border: "2px solid #1976d2", borderRadius: "8px", objectFit: "cover" }}
+          />
+        </Box>
+      )}
+      {capturedImage.details && (
+        <Box sx={{ fontSize: "0.75rem", color: "#6c757d", bgcolor: "#e9ecef", p: 1, borderRadius: 1 }}>
+          <Typography><strong>Size:</strong> {capturedImage.details.sizeKB} KB</Typography>
+          <Typography><strong>Format:</strong> {capturedImage.details.format}</Typography>
+          <Typography><strong>Valid:</strong> {capturedImage.details.isValid ? "Yes" : "No"}</Typography>
+        </Box>
+      )}
+    </Box>
+  );
 };
 
 function CheckIn() {
@@ -29,6 +53,7 @@ function CheckIn() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [livenessSessionId, setLivenessSessionId] = useState(null);
+  const [capturedImage, setCapturedImage] = useState(null); // State for captured image
 
   useEffect(() => {
     async function startVideo() {
@@ -72,7 +97,8 @@ function CheckIn() {
       });
       const result = await response.json();
 
-      setMessage(result.success ? "Check-in successful!" : result.message || "No match found");
+      setMessage(result.success ? `Check-in successful! Welcome ${result.name}` : result.message || "No match found");
+      setCapturedImage(result.capturedImage); // Store captured image data
     } catch (err) {
       setMessage(`Error during check-in: ${err.message}`);
     } finally {
@@ -100,84 +126,35 @@ function CheckIn() {
   };
 
   return (
-    <Box>
-      minHeight="100vh"
-      display="flex"
-      flexDirection="column"
-      justifyContent="center"
-      alignItems="center"
-      bgcolor="#f0f2f5"
-      px={{ xs: 2, sm: 4 }}
-      py={4}
-      <Paper
-        elevation={6}
-        sx={{
-          p: { xs: 2, sm: 4 },
-          width: "100%",
-          maxWidth: 600,
-          borderRadius: 2,
-          bgcolor: "white",
-        }}
-      >
-        <Typography
-          variant="h4"
-          align="center"
-          gutterBottom
-          sx={{ fontWeight: "bold", color: "#1976d2" }}
-        >
+    <Box sx={{ minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", bgcolor: "#f0f2f5", px: { xs: 2, sm: 4 }, py: 4 }}>
+      <Paper elevation={6} sx={{ p: { xs: 2, sm: 4 }, width: "100%", maxWidth: 600, borderRadius: 2, bgcolor: "white" }}>
+        <Typography variant="h4" align="center" gutterBottom sx={{ fontWeight: "bold", color: "#1976d2" }}>
           Face Check-In
         </Typography>
 
-        <Box
-          my={3}
-          sx={{
-            position: "relative",
-            width: "100%",
-            aspectRatio: "4/3", // Maintain aspect ratio for video
-            bgcolor: "#000",
-            borderRadius: "8px",
-            overflow: "hidden",
-          }}
-        >
+        <Box my={3} sx={{ position: "relative", width: "100%", aspectRatio: "4/3", bgcolor: "#000", borderRadius: "8px", overflow: "hidden" }}>
           <video
             ref={videoRef}
             autoPlay
             playsInline
             aria-label="Webcam feed for face check-in"
-            style={{
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-            }}
+            style={{ width: "100%", height: "100%", objectFit: "cover" }}
           />
           <canvas ref={canvasRef} style={{ display: "none" }} />
           {isLoading && (
-            <Box
-              sx={{
-                position: "absolute",
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                bgcolor: "rgba(0,0,0,0.5)",
-              }}
-            >
+            <Box sx={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, display: "flex", alignItems: "center", justifyContent: "center", bgcolor: "rgba(0,0,0,0.5)" }}>
               <CircularProgress color="primary" />
             </Box>
           )}
         </Box>
 
         {message && (
-          <Alert
-            severity={message.includes("Error") || message.includes("Failed") ? "error" : "success"}
-            sx={{ my: 2 }}
-          >
+          <Alert severity={message.includes("Error") || message.includes("Failed") ? "error" : "success"} sx={{ my: 2 }}>
             {message}
           </Alert>
         )}
+
+        {capturedImage && <ImagePreview capturedImage={capturedImage} title="Captured Check-In Photo" />}
 
         <Stack direction={{ xs: "column", sm: "row" }} spacing={2} justifyContent="center" mb={3}>
           <Button

@@ -1,45 +1,218 @@
 import express from "express";
 import cors from "cors";
 import multer from "multer";
-import AWS from "aws-sdk";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import { createWriteStream } from "fs";
 import dotenv from "dotenv";
-import {
-  GetFaceLivenessSessionResultsCommand,
-  SearchFacesByImageCommand,
-} from "@aws-sdk/client-rekognition";
 import {
   RekognitionClient,
   CreateFaceLivenessSessionCommand,
+  GetFaceLivenessSessionResultsCommand,
+  SearchFacesByImageCommand,
+  ListFacesCommand,
+  IndexFacesCommand,
+  DetectFacesCommand,
+  CompareFacesCommand,
 } from "@aws-sdk/client-rekognition";
+import {
+  S3Client,
+  GetObjectCommand,
+  ListObjectsV2Command,
+  PutObjectCommand,
+} from "@aws-sdk/client-s3";
+
 dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Setup logging to file
+const logStream = createWriteStream(path.join(__dirname, "server.log"), {
+  flags: "a",
+});
+const originalConsoleLog = console.log;
+console.log = function (...args) {
+  originalConsoleLog.apply(console, args);
+  logStream.write(args.join(" ") + "\n");
+};
+const originalConsoleError = console.error;
+console.error = function (...args) {
+  originalConsoleError.apply(console, args);
+  logStream.write(args.join(" ") + "\n");
+};
 
 const app = express();
 const PORT = 3001;
 
 const checkedInUsers = new Set();
 
-AWS.config.update({
-  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
-  region: process.env.AWS_REGION,
-});
-const s3 = new AWS.S3();
-const rekognition = new AWS.Rekognition();
+// AWS Configuration
+const clientConfig = {
+  region: process.env.AWS_REGION || "us-east-1",
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
+};
+
+const s3Client = new S3Client(clientConfig);
+const rekognitionClient = new RekognitionClient(clientConfig);
 
 const upload = multer({ dest: "uploads/" });
 
 app.use(cors());
 app.use(express.urlencoded({ extended: true }));
+app.use(express.json());
 app.use(express.static(path.join(__dirname, "frontend/dist")));
 
+// Serve temporary preview images
+app.use("/temp-preview", express.static(path.join(__dirname, "temp-previews")));
+
+// Helper function to log image details
+function logImageDetails(imageBuffer, sessionId, source = "unknown") {
+  const sizeInKB = (imageBuffer.length / 1024).toFixed(2);
+  const sizeInMB = (imageBuffer.length / (1024 * 1024)).toFixed(2);
+
+  console.log("\n" + "=".repeat(60));
+  console.log("🖼️  IMAGE CAPTURE LOG");
+  console.log("=".repeat(60));
+  console.log(`📋 Session ID: ${sessionId}`);
+  console.log(`📁 Source: ${source}`);
+  console.log(`📏 Image Size: ${sizeInKB} KB (${sizeInMB} MB)`);
+  console.log(`🔢 Buffer Length: ${imageBuffer.length} bytes`);
+  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+
+  const isJPEG = imageBuffer[0] === 0xff && imageBuffer[1] === 0xd8;
+  const isPNG = imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50;
+
+  console.log(
+    `✅ Format Valid: ${isJPEG ? "JPEG" : isPNG ? "PNG" : "Unknown/Invalid"}`
+  );
+  console.log(
+    `📊 First 10 bytes: [${Array.from(imageBuffer.slice(0, 10))
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join(", ")}]`
+  );
+  console.log("=".repeat(60) + "\n");
+
+  return {
+    sizeKB: parseFloat(sizeInKB),
+    sizeMB: parseFloat(sizeInMB),
+    isValid: isJPEG || isPNG,
+    format: isJPEG ? "JPEG" : isPNG ? "PNG" : "Unknown",
+  };
+}
+
+// Helper function to create temporary file for preview, this can be used for testing
+async function saveImageForPreview(imageBuffer, sessionId) {
+  try {
+    const previewDir = path.join(__dirname, "temp-previews");
+
+    if (!fs.existsSync(previewDir)) {
+      fs.mkdirSync(previewDir, { recursive: true });
+    }
+
+    const filename = `preview_${sessionId}_${Date.now()}.jpg`;
+    const filepath = path.join(previewDir, filename);
+
+    fs.writeFileSync(filepath, imageBuffer);
+
+    console.log(`💾 Preview image saved: ${filepath}`);
+
+    setTimeout(
+      () => {
+        if (fs.existsSync(filepath)) {
+          fs.unlinkSync(filepath);
+          console.log(`🗑️  Preview image cleaned up: ${filename}`);
+        }
+      },
+      5 * 60 * 1000
+    );
+
+    return `/temp-preview/${filename}`;
+  } catch (error) {
+    console.error("Error saving preview image:", error);
+    return null;
+  }
+}
+
+// Helper function to get S3 object with logging
+async function getS3Object(bucket, key) {
+  try {
+    console.log(`🔍 Fetching S3 object: s3://${bucket}/${key}`);
+
+    const command = new GetObjectCommand({ Bucket: bucket, Key: key });
+    const result = await s3Client.send(command);
+
+    console.log(`✅ S3 fetch successful:`);
+    console.log(`   Content-Type: ${result.ContentType}`);
+    console.log(`   Content-Length: ${result.ContentLength} bytes`);
+    console.log(`   Last-Modified: ${result.LastModified}`);
+
+    const streamToBuffer = async (stream) => {
+      const chunks = [];
+      for await (const chunk of stream) {
+        chunks.push(chunk);
+      }
+      return Buffer.concat(chunks);
+    };
+
+    return await streamToBuffer(result.Body);
+  } catch (error) {
+    console.error(`❌ Error getting S3 object ${key}:`, error.message);
+    throw error;
+  }
+}
+
+// Helper function to list S3 objects with logging
+async function listS3Objects(bucket, prefix) {
+  try {
+    console.log(`📂 Listing S3 objects with prefix: s3://${bucket}/${prefix}`);
+    let allObjects = [];
+    const prefixes = [prefix, "rekognition-output/", "faces/"]; // Include possible prefixes
+    for (const p of prefixes) {
+      const params = { Bucket: bucket, Prefix: p, MaxKeys: 100 };
+      const result = await s3Client.send(new ListObjectsV2Command(params));
+      allObjects = allObjects.concat(result.Contents || []);
+      console.log(
+        `📋 Found ${result.Contents?.length || 0} objects for prefix ${p}:`
+      );
+      console.log("Objects:", JSON.stringify(result.Contents || [], null, 2));
+    }
+    // Log all bucket contents
+    const fullList = await s3Client.send(
+      new ListObjectsV2Command({ Bucket: bucket })
+    );
+    console.log(
+      "All bucket objects:",
+      JSON.stringify(fullList.Contents || [], null, 2)
+    );
+    allObjects.forEach((obj, index) => {
+      console.log(
+        `   ${index + 1}. ${obj.Key} (${obj.Size} bytes, ${obj.LastModified})`
+      );
+    });
+    return allObjects;
+  } catch (error) {
+    console.error(
+      `❌ Error listing S3 objects with prefix ${prefix}:`,
+      error.message
+    );
+    throw error;
+  }
+}
+
+// Main endpoint with liveness and face matching
 app.get("/liveness-result/:sessionId", async (req, res) => {
   const { sessionId } = req.params;
-  console.log("Fetching liveness result for session:", sessionId);
+  const { preview = "false", compareFaceId = null } = req.query;
+
+  console.log("\n" + "🚀".repeat(20));
+  console.log(`🎯 Processing liveness result for session: ${sessionId}`);
+  console.log(`🖼️  Preview requested: ${preview === "true" ? "YES" : "NO"}`);
+  console.log(`🔍 Compare Face ID: ${compareFaceId || "None"}`);
+  console.log("🚀".repeat(20) + "\n");
 
   if (!sessionId) {
     return res.status(400).json({
@@ -49,327 +222,478 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
   }
 
   try {
-    // Get liveness session results
+    console.log("📞 Step 1: Calling AWS Rekognition for liveness results...");
     const command = new GetFaceLivenessSessionResultsCommand({
       SessionId: sessionId,
     });
 
-    const livenessResult = await client.send(command);
-    console.log("Liveness result:", livenessResult);
+    const livenessResult = await rekognitionClient.send(command);
 
-    // Check if person is live
+    console.log("📊 Liveness Analysis Results:");
+    console.log(`   Status: ${livenessResult.Status}`);
+    console.log(`   Confidence: ${livenessResult.Confidence}%`);
+    console.log(`   Session ID: ${livenessResult.SessionId}`);
+
     const isLive =
-      livenessResult.Status === "SUCCEEDED" && livenessResult.Confidence > 90; // Adjust threshold as needed
+      livenessResult.Status === "SUCCEEDED" && livenessResult.Confidence > 85;
 
-    if (isLive) {
-      // If person is live, extract the face from the liveness session
-      // and compare it against your Rekognition collection
-
-      // The liveness session stores the video/images in S3
-      // You need to extract a frame and search for matches
-
-      try {
-        // Get the reference image from the liveness session
-        // This requires downloading from S3 where Rekognition stored the session data
-        const s3Key = `rekognition-output/${sessionId}/`; // Based on your session creation
-
-        // List objects in the S3 prefix to find the reference image
-        const listParams = {
-          Bucket: process.env.S3_BUCKET,
-          Prefix: s3Key,
-        };
-
-        const listResult = await s3.listObjectsV2(listParams).promise();
-
-        // Find the reference image (usually ends with reference-image.jpg or similar)
-        const referenceImageObj = listResult.Contents.find(
-          (obj) => obj.Key.includes("reference") || obj.Key.includes("image")
-        );
-
-        if (referenceImageObj) {
-          // Get the reference image from S3
-          const imageParams = {
-            Bucket: process.env.S3_BUCKET,
-            Key: referenceImageObj.Key,
-          };
-
-          const imageResult = await s3.getObject(imageParams).promise();
-
-          // Search for faces in your collection using the reference image
-          const searchParams = {
-            CollectionId: process.env.REKOGNITION_COLLECTION,
-            Image: {
-              Bytes: imageResult.Body,
-            },
-            FaceMatchThreshold: 90,
-            MaxFaces: 1,
-          };
-
-          const searchResult = await rekognition
-            .searchFacesByImage(searchParams)
-            .promise();
-
-          if (searchResult.FaceMatches.length > 0) {
-            const matchedFace = searchResult.FaceMatches[0];
-            const name = matchedFace.Face.ExternalImageId;
-            const similarity = matchedFace.Similarity;
-
-            // Add to checked-in users
-            checkedInUsers.add(name);
-
-            res.json({
-              success: true,
-              isLive: true,
-              confidence: livenessResult.Confidence / 100,
-              faceMatch: {
-                found: true,
-                name: name,
-                similarity: similarity,
-              },
-              message: `Welcome ${name}! Face verified with ${similarity.toFixed(1)}% similarity.`,
-            });
-          } else {
-            // Person is live but not in the collection
-            res.json({
-              success: true,
-              isLive: true,
-              confidence: livenessResult.Confidence / 100,
-              faceMatch: {
-                found: false,
-              },
-              message:
-                "You are verified as a live person, but your face is not in our system.",
-            });
-          }
-        } else {
-          // Could not find reference image
-          res.json({
-            success: true,
-            isLive: true,
-            confidence: livenessResult.Confidence / 100,
-            faceMatch: {
-              found: false,
-            },
-            message:
-              "Liveness verified but could not extract face for matching.",
-          });
-        }
-      } catch (faceMatchError) {
-        console.error("Face matching error:", faceMatchError);
-        // Still return liveness success even if face matching fails
-        res.json({
-          success: true,
-          isLive: true,
-          confidence: livenessResult.Confidence / 100,
-          faceMatch: {
-            found: false,
-            error: faceMatchError.message,
-          },
-          message: "Liveness verified but face matching failed.",
-        });
-      }
-    } else {
-      // Person is not live
-      res.json({
+    if (!isLive) {
+      console.log(
+        `❌ Liveness check failed - Status: ${livenessResult.Status}, Confidence: ${livenessResult.Confidence}%`
+      );
+      return res.json({
         success: true,
         isLive: false,
         confidence: livenessResult.Confidence / 100,
         reason:
           livenessResult.Status === "FAILED"
             ? "Liveness check failed"
-            : "Low confidence score",
+            : `Low confidence score: ${livenessResult.Confidence}%`,
         message: "Liveness verification failed. Please try again.",
       });
     }
+
+    console.log("✅ Liveness verification passed!");
+
+    console.log("\n📂 Step 2: Looking for reference image in S3...");
+
+    let faceMatch = { found: false };
+    let capturedImageInfo = null;
+    let previewUrl = null;
+
+    try {
+      const s3Prefix = `rekognition-output/${sessionId}/`;
+      const s3Objects = await listS3Objects(process.env.S3_BUCKET, s3Prefix);
+
+      const referenceImageObj = s3Objects.find((obj) => {
+        const key = obj.Key.toLowerCase();
+        return (
+          key.includes("reference") ||
+          key.includes("image") ||
+          key.includes("face") ||
+          key.includes("frame") ||
+          key.endsWith(".jpg") ||
+          key.endsWith(".jpeg") ||
+          key.endsWith(".png")
+        );
+      });
+
+      if (referenceImageObj) {
+        console.log(`🎯 Found reference image: ${referenceImageObj.Key}`);
+
+        const imageBuffer = await getS3Object(
+          process.env.S3_BUCKET,
+          referenceImageObj.Key
+        );
+
+        capturedImageInfo = logImageDetails(
+          imageBuffer,
+          sessionId,
+          "AWS Liveness Session"
+        );
+
+        if (preview === "true") {
+          // console.log("🖼️  Creating preview image...");
+          // previewUrl = await saveImageForPreview(imageBuffer, sessionId);
+        }
+
+        console.log("\n🔍 Step 3: Searching for face match in collection...");
+
+        const detectFaces = await rekognitionClient.send(
+          new DetectFacesCommand({ Image: { Bytes: imageBuffer } })
+        );
+        console.log(
+          "DetectFaces response:",
+          JSON.stringify(detectFaces, null, 2)
+        );
+
+        if (!detectFaces.FaceDetails || detectFaces.FaceDetails.length === 0) {
+          console.log("❌ No faces detected in the image");
+          faceMatch = { found: false, error: "No faces detected in the image" };
+        } else {
+          // Use CompareFaces if compareFaceId is provided
+          if (compareFaceId) {
+            console.log(`🔍 Comparing with specific face ID: ${compareFaceId}`);
+            // Assume compareFaceId is an S3 key for the reference image
+            const referenceImageBuffer = await getS3Object(
+              process.env.S3_BUCKET,
+              `faces/${compareFaceId}.jpg` // Adjust path as needed
+            );
+
+            const compareResult = await rekognitionClient.send(
+              new CompareFacesCommand({
+                SourceImage: { Bytes: imageBuffer },
+                TargetImage: { Bytes: referenceImageBuffer },
+                SimilarityThreshold: 70,
+              })
+            );
+
+            console.log(
+              "CompareFaces response:",
+              JSON.stringify(compareResult, null, 2)
+            );
+
+            if (
+              compareResult.FaceMatches &&
+              compareResult.FaceMatches.length > 0
+            ) {
+              const bestMatch = compareResult.FaceMatches[0];
+              faceMatch = {
+                found: true,
+                name: compareFaceId,
+                similarity: bestMatch.Similarity,
+                details: bestMatch,
+              };
+              console.log(
+                `🎉 Face match with ${compareFaceId}: ${bestMatch.Similarity.toFixed(1)}%`
+              );
+            } else {
+              console.log(`❌ No match found for face ID: ${compareFaceId}`);
+              faceMatch = { found: false };
+            }
+          } else {
+            // Use SearchFacesByImage (existing logic)
+            const searchResult = await rekognitionClient.send(
+              new SearchFacesByImageCommand({
+                CollectionId: process.env.REKOGNITION_COLLECTION,
+                Image: { Bytes: imageBuffer },
+                FaceMatchThreshold: 70,
+                MaxFaces: 5,
+              })
+            );
+
+            console.log(
+              `📊 Face search results: ${searchResult.FaceMatches?.length || 0} matches found`
+            );
+            console.log(
+              "Raw searchFacesByImage response:",
+              JSON.stringify(searchResult, null, 2)
+            );
+
+            if (
+              searchResult.FaceMatches &&
+              searchResult.FaceMatches.length > 0
+            ) {
+              searchResult.FaceMatches.forEach((match, index) => {
+                console.log(`   Match ${index + 1}:`);
+                console.log(`     Name: ${match.Face.ExternalImageId}`);
+                console.log(`     Similarity: ${match.Similarity.toFixed(2)}%`);
+                console.log(`     Face ID: ${match.Face.FaceId}`);
+              });
+
+              const bestMatch = searchResult.FaceMatches[0];
+              const name = bestMatch.Face.ExternalImageId;
+              const similarity = bestMatch.Similarity;
+
+              checkedInUsers.add(name);
+
+              faceMatch = {
+                found: true,
+                name: name,
+                similarity: similarity,
+                faceId: bestMatch.Face.FaceId,
+                allMatches: searchResult.FaceMatches.map((match) => ({
+                  name: match.Face.ExternalImageId,
+                  similarity: match.Similarity,
+                  faceId: match.Face.FaceId,
+                })),
+              };
+
+              console.log(
+                `🎉 Best face match: ${name} with ${similarity.toFixed(1)}% similarity`
+              );
+            } else {
+              console.log("❓ No face matches found in collection");
+            }
+          }
+        }
+      } else {
+        console.log("❌ No reference image found in S3");
+      }
+    } catch (faceMatchError) {
+      console.error("🚨 Face matching error:", faceMatchError);
+      faceMatch = {
+        found: false,
+        error: faceMatchError.message,
+      };
+    }
+
+    const response = {
+      success: true,
+      isLive: true,
+      confidence: livenessResult.Confidence / 100,
+      faceMatch: faceMatch,
+      sessionId: sessionId,
+      capturedImage: {
+        found: !!capturedImageInfo,
+        details: capturedImageInfo,
+        previewUrl: previewUrl,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    if (faceMatch.found) {
+      response.message = `Welcome ${faceMatch.name}! Face verified with ${faceMatch.similarity.toFixed(1)}% similarity.`;
+    } else if (faceMatch.error) {
+      response.message =
+        "Liveness verified but face matching encountered an error.";
+    } else {
+      response.message =
+        "You are verified as a live person, but your face is not in our system.";
+    }
+
+    console.log("\n🎊 Final Response Summary:");
+    console.log(`   Liveness: ${response.isLive ? "✅ PASS" : "❌ FAIL"}`);
+    console.log(
+      `   Face Match: ${faceMatch.found ? "✅ FOUND" : "❓ NOT FOUND"}`
+    );
+    console.log(
+      `   Image Captured: ${response.capturedImage.found ? "✅ YES" : "❌ NO"}`
+    );
+    if (previewUrl) console.log(`   Preview URL: ${previewUrl}`);
+    console.log("🎊".repeat(20) + "\n");
+
+    res.json(response);
   } catch (error) {
-    console.error("Error getting liveness results:", error);
+    console.error("\n🚨 ERROR in liveness-result endpoint:", error);
+    console.error("Stack trace:", error.stack);
+
     res.status(500).json({
       success: false,
       error: error.message,
-      message: "Failed to retrieve liveness results",
+      message: "Failed to process liveness results. Please try again.",
+      timestamp: new Date().toISOString(),
     });
   }
 });
-app.post("/index-face", upload.single("photo"), async (req, res) => {
+
+// Session creation endpoint
+app.get("/session", async (req, res) => {
   try {
-    const name = req.body.name?.trim();
-    if (!name) {
-      return res
-        .status(400)
-        .json({ success: false, error: "Missing name field" });
-    }
+    console.log("🆕 Creating new liveness session...");
+    console.log(`S3 Bucket: ${process.env.S3_BUCKET}`);
+    console.log(`S3 Prefix: rekognition-output/`);
+
+    const command = new CreateFaceLivenessSessionCommand({
+      Settings: {
+        OutputConfig: {
+          S3Bucket: process.env.S3_BUCKET,
+          S3Prefix: "rekognition-output/",
+        },
+      },
+    });
+
+    const response = await rekognitionClient.send(command);
+
+    console.log(`✅ Liveness session created: ${response.SessionId}`);
+    console.log(
+      `📁 Output will be stored in: s3://${process.env.S3_BUCKET}/rekognition-output/`
+    );
+
+    res.json({
+      sessionId: response.SessionId,
+      success: true,
+    });
+  } catch (err) {
+    console.error("❌ Error creating liveness session:", err);
+    res.status(500).json({
+      success: false,
+      error: err.message,
+    });
+  }
+});
+
+// Enhanced checkin endpoint with logging and preview
+app.post("/checkin", upload.single("photo"), async (req, res) => {
+  try {
+    console.log("\n📸 Manual check-in initiated");
+
     if (!req.file) {
       return res
         .status(400)
-        .json({ success: false, error: "Missing photo file" });
+        .json({ success: false, error: "No photo uploaded" });
     }
 
-    const photoBuffer = fs.readFileSync(req.file.path);
-    const s3Key = `faces/${Date.now()}_${req.file.originalname}`;
+    const photo = fs.readFileSync(req.file.path);
 
-    await s3
-      .upload({
-        Bucket: process.env.S3_BUCKET,
-        Key: s3Key,
-        Body: photoBuffer,
-        ContentType: req.file.mimetype,
-      })
-      .promise();
+    const imageDetails = logImageDetails(
+      photo,
+      "manual-checkin",
+      "Manual Upload"
+    );
 
-    const safeName = name.replace(/[^a-zA-Z0-9_.\-:]/g, "_");
-    const rekogResult = await rekognition
-      .indexFaces({
+    //const previewUrl = await saveImageForPreview(photo, "manual-checkin");
+
+    const detectFaces = await rekognitionClient.send(
+      new DetectFacesCommand({ Image: { Bytes: photo } })
+    );
+    console.log("DetectFaces response:", JSON.stringify(detectFaces, null, 2));
+
+    const searchResult = await rekognitionClient.send(
+      new SearchFacesByImageCommand({
         CollectionId: process.env.REKOGNITION_COLLECTION,
-        Image: {
-          S3Object: {
-            Bucket: process.env.S3_BUCKET,
-            Name: s3Key,
-          },
-        },
-        ExternalImageId: safeName,
-        DetectionAttributes: ["DEFAULT"],
+        Image: { Bytes: photo },
+        FaceMatchThreshold: 70,
+        MaxFaces: 1,
       })
-      .promise();
+    );
+
+    console.log(
+      "Raw searchFacesByImage response:",
+      JSON.stringify(searchResult, null, 2)
+    );
 
     fs.unlinkSync(req.file.path);
 
-    const faceRecord = rekogResult.FaceRecords?.[0];
-    if (!faceRecord) {
-      return res.json({ success: false, message: "No face detected in image" });
-    }
+    if (searchResult.FaceMatches && searchResult.FaceMatches.length > 0) {
+      const matchedFace = searchResult.FaceMatches[0].Face;
+      const name = matchedFace.ExternalImageId;
+      const similarity = searchResult.FaceMatches[0].Similarity;
 
-    res.json({ success: true, name });
+      checkedInUsers.add(name);
+
+      console.log(
+        `✅ Manual check-in successful: ${name} (${similarity.toFixed(1)}%)`
+      );
+
+      res.json({
+        success: true,
+        name: name,
+        similarity: similarity,
+        capturedImage: {
+          found: true,
+          details: imageDetails,
+          previewUrl: previewUrl,
+        },
+      });
+    } else {
+      console.log("❌ Manual check-in: No matching face found");
+      res.json({
+        success: false,
+        message: "No matching face found in collection",
+        capturedImage: {
+          found: true,
+          details: imageDetails,
+          previewUrl: previewUrl,
+        },
+      });
+    }
   } catch (err) {
-    console.error("Error during face indexing:", err);
+    console.error("🚨 Manual check-in error:", err);
+    if (req.file && fs.existsSync(req.file.path)) {
+      fs.unlinkSync(req.file.path);
+    }
     res.status(500).json({ success: false, error: err.message });
   }
 });
 
-const client = new RekognitionClient({ region: "us-east-1" });
-
-app.get("/session", async (req, res) => {
-  const command = new CreateFaceLivenessSessionCommand({
-    Settings: {
-      OutputConfig: {
-        S3Bucket: "face-recognition-sang2025-2",
-        S3Prefix: "rekognition-output",
-      },
-    },
-  });
+// Index face endpoint with S3 upload
+app.post("/index-face", upload.single("photo"), async (req, res) => {
   try {
-    const response = await client.send(command);
-    res.json({ sessionId: response.SessionId });
+    if (!req.file) return res.status(400).json({ error: "No photo uploaded" });
+    const photo = fs.readFileSync(req.file.path);
+    const externalImageId = `user-${Date.now()}`; // Unique ID
+
+    // Upload to S3
+    const s3Key = `faces/${externalImageId}.jpg`;
+    await s3Client.send(
+      new PutObjectCommand({
+        Bucket: process.env.S3_BUCKET,
+        Key: s3Key,
+        Body: photo,
+        ContentType: "image/jpeg",
+      })
+    );
+    console.log(
+      `📤 Image uploaded to S3: s3://${process.env.S3_BUCKET}/${s3Key}`
+    );
+
+    // Index face in Rekognition
+    const command = new IndexFacesCommand({
+      CollectionId: process.env.REKOGNITION_COLLECTION,
+      Image: { Bytes: photo },
+      ExternalImageId: externalImageId,
+    });
+    const result = await rekognitionClient.send(command);
+    fs.unlinkSync(req.file.path);
+    console.log(`Face indexed: ${result.FaceRecords[0].Face.FaceId}`);
+    res.json({
+      success: true,
+      faceId: result.FaceRecords[0].Face.FaceId,
+      externalImageId: externalImageId,
+    });
   } catch (err) {
-    console.error("Error creating liveness session:", err);
+    console.error("Error indexing face:", err);
+    if (req.file) fs.unlinkSync(req.file.path);
     res.status(500).json({ error: err.message });
   }
 });
-app.post("/checkin", upload.single("photo"), async (req, res) => {
-  try {
-    const photo = fs.readFileSync(req.file.path);
-    const params = {
-      CollectionId: process.env.REKOGNITION_COLLECTION,
-      Image: { Bytes: photo },
-      FaceMatchThreshold: 90,
-      MaxFaces: 1,
-    };
 
-    const result = await rekognition.searchFacesByImage(params).promise();
-    fs.unlinkSync(req.file.path);
-
-    if (result.FaceMatches.length > 0) {
-      const matchedFace = result.FaceMatches[0].Face;
-      const name = matchedFace.ExternalImageId;
-      checkedInUsers.add(name);
-      res.json({ success: true, name });
-    } else {
-      res.json({ success: false, message: "No match found" });
-    }
-  } catch (err) {
-    console.error("Check-in error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
+// Attendance endpoint
 app.get("/attendance", (req, res) => {
-  res.json({ success: true, checkedIn: Array.from(checkedInUsers) });
+  res.json({
+    success: true,
+    checkedIn: Array.from(checkedInUsers),
+  });
 });
-
+// List all faces from Rekognition collection
+// List all faces from Rekognition collection
 app.get("/list-collections", async (req, res) => {
-  let faces = [];
   try {
-    const params = {
-      CollectionId: process.env.REKOGNITION_COLLECTION,
-      MaxResults: 10,
-    };
-    let data = await rekognition.listFaces(params).promise();
-    faces = faces.concat(data.Faces);
+    const faces = [];
+    let result = await rekognitionClient.send(
+      new ListFacesCommand({
+        CollectionId: process.env.REKOGNITION_COLLECTION,
+        MaxResults: 100,
+      })
+    );
 
-    while (data.NextToken) {
-      params.NextToken = data.NextToken;
-      data = await rekognition.listFaces(params).promise();
-      faces = faces.concat(data.Faces);
+    faces.push(...result.Faces);
+
+    while (result.NextToken) {
+      result = await rekognitionClient.send(
+        new ListFacesCommand({
+          CollectionId: process.env.REKOGNITION_COLLECTION,
+          NextToken: result.NextToken,
+          MaxResults: 100,
+        })
+      );
+      faces.push(...result.Faces);
     }
 
-    // Attach s3Key using ImageId (if you used that for S3 key)
-    const processedFaces = faces.map((face) => ({
+    const processed = faces.map((face) => ({
       FaceId: face.FaceId,
       ExternalImageId: face.ExternalImageId,
-      ImageId: face.ImageId, // this matches the Key used when indexing
-      s3Key: `faces/${face.ImageId}`, // assuming this structure
+      s3Key: `faces/${face.ExternalImageId}.jpg`,
     }));
 
-    res.json({ success: true, faces: processedFaces });
+    res.json({ success: true, faces: processed });
   } catch (err) {
-    console.error("Error listing faces:", err);
-    return res.status(500).json({ success: false, error: err.message });
-  }
-});
-app.get("/get-s3-url", async (req, res) => {
-  const { key } = req.query;
-
-  if (!key) {
-    return res.status(400).json({ success: false, error: "Missing S3 key" });
-  }
-
-  try {
-    const url = s3.getSignedUrl("getObject", {
-      Bucket: process.env.S3_BUCKET,
-      Key: key,
-      Expires: 60, // 1 minute expiry
-    });
-    res.json({ success: true, url });
-  } catch (err) {
-    console.error("Error generating signed URL:", err);
+    console.error("Error listing collections:", err);
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-app.delete("/delete-face", express.json(), async (req, res) => {
+// Delete face from collection and S3
+app.delete("/delete-face", async (req, res) => {
   const { faceId, s3Key } = req.body;
-
-  if (!faceId || !s3Key) {
+  if (!faceId || !s3Key)
     return res
       .status(400)
       .json({ success: false, error: "Missing faceId or s3Key" });
-  }
-
   try {
-    // 1. Delete from Rekognition
-    await rekognition
-      .deleteFaces({
+    await rekognitionClient.send(
+      new DeleteFacesCommand({
         CollectionId: process.env.REKOGNITION_COLLECTION,
         FaceIds: [faceId],
       })
-      .promise();
+    );
 
-    // 2. Delete from S3
-    await s3
-      .deleteObject({
+    await s3Client.send(
+      new DeleteObjectCommand({
         Bucket: process.env.S3_BUCKET,
         Key: s3Key,
       })
-      .promise();
+    );
 
     res.json({ success: true, message: "Face and image deleted successfully" });
   } catch (err) {
@@ -377,154 +701,8 @@ app.delete("/delete-face", express.json(), async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-
-// Alternative simpler endpoint if you just want to check liveness without face matching
-app.get("/liveness-result/:sessionId", async (req, res) => {
-  try {
-    const { sessionId } = req.params;
-
-    // Analyze liveness result from AWS SDK
-    const livenessResult = await analyzeLiveness(sessionId); // <- Your existing function
-    const { isLive, confidence, imageBytes } = livenessResult;
-
-    let faceMatch = null;
-
-    if (imageBytes) {
-      const matchParams = {
-        CollectionId: process.env.REKOGNITION_COLLECTION,
-        Image: { Bytes: imageBytes },
-        FaceMatchThreshold: 90,
-        MaxFaces: 1,
-      };
-
-      const rekognitionResult = await rekognition
-        .searchFacesByImage(matchParams)
-        .promise();
-
-      if (rekognitionResult.FaceMatches.length > 0) {
-        const matchedFace = rekognitionResult.FaceMatches[0].Face;
-        faceMatch = {
-          found: true,
-          name: matchedFace.ExternalImageId,
-          confidence: matchedFace.Confidence,
-        };
-      } else {
-        faceMatch = { found: false };
-      }
-    }
-
-    res.json({
-      success: true,
-      isLive,
-      confidence,
-      faceMatch,
-      message: isLive ? "Liveness verified" : "Liveness check failed",
-    });
-  } catch (err) {
-    console.error("Liveness + Match error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-
-// Endpoint to manually trigger face matching after liveness (optional)
-app.post("/match-after-liveness", upload.single("photo"), async (req, res) => {
-  try {
-    const { sessionId } = req.body;
-
-    // If sessionId is provided, verify liveness first
-    if (sessionId) {
-      const command = new GetFaceLivenessSessionResultsCommand({
-        SessionId: sessionId,
-      });
-
-      const livenessResult = await client.send(command);
-      const isLive =
-        livenessResult.Status === "SUCCEEDED" && livenessResult.Confidence > 90;
-
-      if (!isLive) {
-        return res.json({
-          success: false,
-          message: "Liveness verification required before face matching",
-        });
-      }
-    }
-    // Proceed with face matching using uploaded photo
-    const photo = fs.readFileSync(req.file.path);
-    const params = {
-      CollectionId: process.env.REKOGNITION_COLLECTION,
-      Image: { Bytes: photo },
-      FaceMatchThreshold: 90,
-      MaxFaces: 1,
-    };
-
-    const result = await rekognition.searchFacesByImage(params).promise();
-    fs.unlinkSync(req.file.path);
-
-    if (result.FaceMatches.length > 0) {
-      const matchedFace = result.FaceMatches[0].Face;
-      const name = matchedFace.ExternalImageId;
-      const similarity = result.FaceMatches[0].Similarity;
-
-      checkedInUsers.add(name);
-
-      res.json({
-        success: true,
-        name: name,
-        similarity: similarity,
-        livenessVerified: !!sessionId,
-      });
-    } else {
-      res.json({
-        success: false,
-        message: "No face match found in collection",
-        livenessVerified: !!sessionId,
-      });
-    }
-  } catch (err) {
-    console.error("Match after liveness error:", err);
-    res.status(500).json({ success: false, error: err.message });
-  }
-});
-app.post(
-  "/check-face",
-  express.raw({ type: "application/octet-stream", limit: "5mb" }),
-  async (req, res) => {
-    try {
-      const imageBuffer = req.body;
-
-      if (!imageBuffer || !Buffer.isBuffer(imageBuffer)) {
-        return res
-          .status(400)
-          .json({ success: false, message: "Invalid image data." });
-      }
-
-      const params = {
-        CollectionId: process.env.REKOGNITION_COLLECTION,
-        Image: { Bytes: imageBuffer },
-        FaceMatchThreshold: 90,
-        MaxFaces: 1,
-      };
-
-      const result = await rekognition.searchFacesByImage(params).promise();
-
-      if (result.FaceMatches && result.FaceMatches.length > 0) {
-        const matched = result.FaceMatches[0];
-
-        res.json({
-          success: true,
-          name: matched.Face.ExternalImageId || "Unknown",
-          similarity: matched.Similarity,
-          faceId: matched.Face.FaceId,
-        });
-      } else {
-        res.json({ success: false, message: "No matching face found." });
-      }
-    } catch (err) {
-      console.error("Error in /check-face:", err);
-      res.status(500).json({ success: false, error: err.message });
-    }
-  }
-);
 app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`🚀 Server running on http://localhost:${PORT}`);
+  console.log(`📋 Logging enabled for image capture and face recognition`);
+  console.log(`🖼️  Use ?preview=true to get image previews`);
 });
