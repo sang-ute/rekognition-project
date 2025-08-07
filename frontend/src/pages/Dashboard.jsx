@@ -1,43 +1,73 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
-import { Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Button, CircularProgress } from '@mui/material';
+import {
+  Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
+  TableRow, Paper, Button, CircularProgress, Stack
+} from '@mui/material';
 
 function Dashboard() {
   const [faces, setFaces] = useState([]);
   const [checkedIn, setCheckedIn] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [deleting, setDeleting] = useState('');
+
+  const fetchData = async () => {
+    setLoading(true);
+    try {
+      const [facesResponse, attendanceResponse] = await Promise.all([
+        fetch('/list-collections'),
+        fetch('/attendance'),
+      ]);
+
+      const facesData = await facesResponse.json();
+      const attendanceData = await attendanceResponse.json();
+
+      if (facesData.success) {
+        setFaces(facesData.faces);
+      } else {
+        setError(facesData.error || 'Failed to load faces');
+      }
+
+      if (attendanceData.success) {
+        setCheckedIn(attendanceData.checkedIn);
+      } else {
+        setError(attendanceData.error || 'Failed to load attendance');
+      }
+    } catch (err) {
+      setError('Error fetching data: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    async function fetchData() {
-      try {
-        const [facesResponse, attendanceResponse] = await Promise.all([
-          fetch('/list-collections'),
-          fetch('/attendance')
-        ]);
-
-        const facesData = await facesResponse.json();
-        const attendanceData = await attendanceResponse.json();
-
-        if (facesData.success) {
-          setFaces(facesData.faces);
-        } else {
-          setError(facesData.error || 'Failed to load faces');
-        }
-
-        if (attendanceData.success) {
-          setCheckedIn(attendanceData.checkedIn);
-        } else {
-          setError(attendanceData.error || 'Failed to load attendance');
-        }
-      } catch (err) {
-        setError('Error fetching data: ' + err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
     fetchData();
   }, []);
+
+  const handleDelete = async (faceId, s3Key) => {
+    const confirm = window.confirm('Are you sure you want to delete this face?');
+    if (!confirm) return;
+
+    setDeleting(faceId);
+    try {
+      const response = await fetch('/delete-face', {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ faceId, s3Key }),
+      });
+      const result = await response.json();
+      if (result.success) {
+        await fetchData(); // Refresh after delete
+      } else {
+        alert(result.error || 'Delete failed');
+      }
+    } catch (err) {
+      alert('Error deleting face: ' + err.message);
+    } finally {
+      setDeleting('');
+    }
+  };
 
   return (
     <Box
@@ -59,12 +89,13 @@ function Dashboard() {
         </Typography>
       )}
       {!loading && !error && (
-        <TableContainer component={Paper} sx={{ maxWidth: 600 }}>
+        <TableContainer component={Paper} sx={{ maxWidth: 800 }}>
           <Table>
             <TableHead>
               <TableRow>
                 <TableCell>Name</TableCell>
                 <TableCell>Status</TableCell>
+                <TableCell>Action</TableCell>
               </TableRow>
             </TableHead>
             <TableBody>
@@ -75,6 +106,19 @@ function Dashboard() {
                   </TableCell>
                   <TableCell>
                     {checkedIn.includes(face.ExternalImageId) ? 'Checked In' : 'Not Checked In'}
+                  </TableCell>
+                  <TableCell>
+                    <Stack direction="row" spacing={1}>
+                      <Button
+                        variant="outlined"
+                        color="error"
+                        size="small"
+                        disabled={deleting === face.FaceId}
+                        onClick={() => handleDelete(face.FaceId, face.s3Key)}
+                      >
+                        {deleting === face.FaceId ? 'Deleting...' : 'Delete'}
+                      </Button>
+                    </Stack>
                   </TableCell>
                 </TableRow>
               ))}

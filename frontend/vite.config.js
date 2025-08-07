@@ -10,6 +10,16 @@ export default defineConfig({
       "/index-face": "http://localhost:3001",
       "/attendance": "http://localhost:3001",
       "/list-collections": "http://localhost:3001",
+      // "/liveness-result": "http://localhost:3001",
+      "/liveness-result": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "/session": {
+        target: "http://localhost:3001",
+        changeOrigin: true,
+      },
+      "/delete-face": "http://localhost:3001",
     },
   },
 });
