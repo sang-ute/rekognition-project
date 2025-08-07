@@ -67,7 +67,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, "frontend/dist")));
 
 // Serve temporary preview images
-app.use("/temp-preview", express.static(path.join(__dirname, "temp-previews")));
+//app.use("/temp-preview", express.static(path.join(__dirname, "temp-previews")));
 
 // Helper function to log image details
 function logImageDetails(imageBuffer, sessionId, source = "unknown") {
@@ -75,22 +75,22 @@ function logImageDetails(imageBuffer, sessionId, source = "unknown") {
   const sizeInMB = (imageBuffer.length / (1024 * 1024)).toFixed(2);
 
   console.log("\n" + "=".repeat(60));
-  console.log("🖼️  IMAGE CAPTURE LOG");
+  console.log("  IMAGE CAPTURE LOG");
   console.log("=".repeat(60));
-  console.log(`📋 Session ID: ${sessionId}`);
-  console.log(`📁 Source: ${source}`);
-  console.log(`📏 Image Size: ${sizeInKB} KB (${sizeInMB} MB)`);
-  console.log(`🔢 Buffer Length: ${imageBuffer.length} bytes`);
-  console.log(`⏰ Timestamp: ${new Date().toISOString()}`);
+  console.log(` Session ID: ${sessionId}`);
+  console.log(` Source: ${source}`);
+  console.log(` Image Size: ${sizeInKB} KB (${sizeInMB} MB)`);
+  console.log(` Buffer Length: ${imageBuffer.length} bytes`);
+  console.log(` Timestamp: ${new Date().toISOString()}`);
 
   const isJPEG = imageBuffer[0] === 0xff && imageBuffer[1] === 0xd8;
   const isPNG = imageBuffer[0] === 0x89 && imageBuffer[1] === 0x50;
 
   console.log(
-    `✅ Format Valid: ${isJPEG ? "JPEG" : isPNG ? "PNG" : "Unknown/Invalid"}`
+    `Format Valid: ${isJPEG ? "JPEG" : isPNG ? "PNG" : "Unknown/Invalid"}`
   );
   console.log(
-    `📊 First 10 bytes: [${Array.from(imageBuffer.slice(0, 10))
+    `First 10 bytes: [${Array.from(imageBuffer.slice(0, 10))
       .map((b) => b.toString(16).padStart(2, "0"))
       .join(", ")}]`
   );
@@ -118,7 +118,7 @@ async function saveImageForPreview(imageBuffer, sessionId) {
 
     fs.writeFileSync(filepath, imageBuffer);
 
-    console.log(`💾 Preview image saved: ${filepath}`);
+    console.log(`Preview image saved: ${filepath}`);
 
     setTimeout(
       () => {
@@ -130,7 +130,7 @@ async function saveImageForPreview(imageBuffer, sessionId) {
       5 * 60 * 1000
     );
 
-    return `/temp-preview/${filename}`;
+    //return `/temp-preview/${filename}`;
   } catch (error) {
     console.error("Error saving preview image:", error);
     return null;
@@ -140,15 +140,15 @@ async function saveImageForPreview(imageBuffer, sessionId) {
 // Helper function to get S3 object with logging
 async function getS3Object(bucket, key) {
   try {
-    console.log(`🔍 Fetching S3 object: s3://${bucket}/${key}`);
+    console.log(`Fetching S3 object: s3://${bucket}/${key}`);
 
     const command = new GetObjectCommand({ Bucket: bucket, Key: key });
     const result = await s3Client.send(command);
 
-    console.log(`✅ S3 fetch successful:`);
-    console.log(`   Content-Type: ${result.ContentType}`);
-    console.log(`   Content-Length: ${result.ContentLength} bytes`);
-    console.log(`   Last-Modified: ${result.LastModified}`);
+    console.log(`S3 fetch successful:`);
+    console.log(`Content-Type: ${result.ContentType}`);
+    console.log(`Content-Length: ${result.ContentLength} bytes`);
+    console.log(`Last-Modified: ${result.LastModified}`);
 
     const streamToBuffer = async (stream) => {
       const chunks = [];
@@ -160,7 +160,7 @@ async function getS3Object(bucket, key) {
 
     return await streamToBuffer(result.Body);
   } catch (error) {
-    console.error(`❌ Error getting S3 object ${key}:`, error.message);
+    console.error(` Error getting S3 object ${key}:`, error.message);
     throw error;
   }
 }
@@ -168,7 +168,7 @@ async function getS3Object(bucket, key) {
 // Helper function to list S3 objects with logging
 async function listS3Objects(bucket, prefix) {
   try {
-    console.log(`📂 Listing S3 objects with prefix: s3://${bucket}/${prefix}`);
+    console.log(` Listing S3 objects with prefix: s3://${bucket}/${prefix}`);
     let allObjects = [];
     const prefixes = [prefix, "rekognition-output/", "faces/"]; // Include possible prefixes
     for (const p of prefixes) {
@@ -176,7 +176,7 @@ async function listS3Objects(bucket, prefix) {
       const result = await s3Client.send(new ListObjectsV2Command(params));
       allObjects = allObjects.concat(result.Contents || []);
       console.log(
-        `📋 Found ${result.Contents?.length || 0} objects for prefix ${p}:`
+        ` Found ${result.Contents?.length || 0} objects for prefix ${p}:`
       );
       console.log("Objects:", JSON.stringify(result.Contents || [], null, 2));
     }
@@ -196,7 +196,7 @@ async function listS3Objects(bucket, prefix) {
     return allObjects;
   } catch (error) {
     console.error(
-      `❌ Error listing S3 objects with prefix ${prefix}:`,
+      ` Error listing S3 objects with prefix ${prefix}:`,
       error.message
     );
     throw error;
@@ -208,11 +208,11 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
   const { sessionId } = req.params;
   const { preview = "false", compareFaceId = null } = req.query;
 
-  console.log("\n" + "🚀".repeat(20));
-  console.log(`🎯 Processing liveness result for session: ${sessionId}`);
-  console.log(`🖼️  Preview requested: ${preview === "true" ? "YES" : "NO"}`);
-  console.log(`🔍 Compare Face ID: ${compareFaceId || "None"}`);
-  console.log("🚀".repeat(20) + "\n");
+  console.log("\n" + "".repeat(20));
+  console.log(`Processing liveness result for session: ${sessionId}`);
+  console.log(`Preview requested: ${preview === "true" ? "YES" : "NO"}`);
+  console.log(`Compare Face ID: ${compareFaceId || "None"}`);
+  console.log("".repeat(20) + "\n");
 
   if (!sessionId) {
     return res.status(400).json({
@@ -222,24 +222,24 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
   }
 
   try {
-    console.log("📞 Step 1: Calling AWS Rekognition for liveness results...");
+    console.log("Step 1: Calling AWS Rekognition for liveness results...");
     const command = new GetFaceLivenessSessionResultsCommand({
       SessionId: sessionId,
     });
 
     const livenessResult = await rekognitionClient.send(command);
 
-    console.log("📊 Liveness Analysis Results:");
-    console.log(`   Status: ${livenessResult.Status}`);
-    console.log(`   Confidence: ${livenessResult.Confidence}%`);
-    console.log(`   Session ID: ${livenessResult.SessionId}`);
+    console.log("Liveness Analysis Results:");
+    console.log(`Status: ${livenessResult.Status}`);
+    console.log(`Confidence: ${livenessResult.Confidence}%`);
+    console.log(`Session ID: ${livenessResult.SessionId}`);
 
     const isLive =
       livenessResult.Status === "SUCCEEDED" && livenessResult.Confidence > 85;
 
     if (!isLive) {
       console.log(
-        `❌ Liveness check failed - Status: ${livenessResult.Status}, Confidence: ${livenessResult.Confidence}%`
+        ` Liveness check failed - Status: ${livenessResult.Status}, Confidence: ${livenessResult.Confidence}%`
       );
       return res.json({
         success: true,
@@ -253,9 +253,9 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
       });
     }
 
-    console.log("✅ Liveness verification passed!");
+    console.log(" Liveness verification passed!");
 
-    console.log("\n📂 Step 2: Looking for reference image in S3...");
+    console.log("\n Step 2: Looking for reference image in S3...");
 
     let faceMatch = { found: false };
     let capturedImageInfo = null;
@@ -279,7 +279,7 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
       });
 
       if (referenceImageObj) {
-        console.log(`🎯 Found reference image: ${referenceImageObj.Key}`);
+        console.log(` Found reference image: ${referenceImageObj.Key}`);
 
         const imageBuffer = await getS3Object(
           process.env.S3_BUCKET,
@@ -293,11 +293,11 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
         );
 
         if (preview === "true") {
-          // console.log("🖼️  Creating preview image...");
+          // console.log("  Creating preview image...");
           // previewUrl = await saveImageForPreview(imageBuffer, sessionId);
         }
 
-        console.log("\n🔍 Step 3: Searching for face match in collection...");
+        console.log("\n Step 3: Searching for face match in collection...");
 
         const detectFaces = await rekognitionClient.send(
           new DetectFacesCommand({ Image: { Bytes: imageBuffer } })
@@ -308,12 +308,12 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
         );
 
         if (!detectFaces.FaceDetails || detectFaces.FaceDetails.length === 0) {
-          console.log("❌ No faces detected in the image");
+          console.log(" No faces detected in the image");
           faceMatch = { found: false, error: "No faces detected in the image" };
         } else {
           // Use CompareFaces if compareFaceId is provided
           if (compareFaceId) {
-            console.log(`🔍 Comparing with specific face ID: ${compareFaceId}`);
+            console.log(` Comparing with specific face ID: ${compareFaceId}`);
             // Assume compareFaceId is an S3 key for the reference image
             const referenceImageBuffer = await getS3Object(
               process.env.S3_BUCKET,
@@ -348,7 +348,7 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
                 `🎉 Face match with ${compareFaceId}: ${bestMatch.Similarity.toFixed(1)}%`
               );
             } else {
-              console.log(`❌ No match found for face ID: ${compareFaceId}`);
+              console.log(`No match found for face ID: ${compareFaceId}`);
               faceMatch = { found: false };
             }
           } else {
@@ -363,7 +363,7 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
             );
 
             console.log(
-              `📊 Face search results: ${searchResult.FaceMatches?.length || 0} matches found`
+              ` Face search results: ${searchResult.FaceMatches?.length || 0} matches found`
             );
             console.log(
               "Raw searchFacesByImage response:",
@@ -400,18 +400,18 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
               };
 
               console.log(
-                `🎉 Best face match: ${name} with ${similarity.toFixed(1)}% similarity`
+                ` Best face match: ${name} with ${similarity.toFixed(1)}% similarity`
               );
             } else {
-              console.log("❓ No face matches found in collection");
+              console.log(" No face matches found in collection");
             }
           }
         }
       } else {
-        console.log("❌ No reference image found in S3");
+        console.log(" No reference image found in S3");
       }
     } catch (faceMatchError) {
-      console.error("🚨 Face matching error:", faceMatchError);
+      console.error(" Face matching error:", faceMatchError);
       faceMatch = {
         found: false,
         error: faceMatchError.message,
@@ -443,19 +443,17 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
     }
 
     console.log("\n🎊 Final Response Summary:");
-    console.log(`   Liveness: ${response.isLive ? "✅ PASS" : "❌ FAIL"}`);
+    console.log(`   Liveness: ${response.isLive ? " PASS" : " FAIL"}`);
+    console.log(`   Face Match: ${faceMatch.found ? " FOUND" : "NOT FOUND"}`);
     console.log(
-      `   Face Match: ${faceMatch.found ? "✅ FOUND" : "❓ NOT FOUND"}`
-    );
-    console.log(
-      `   Image Captured: ${response.capturedImage.found ? "✅ YES" : "❌ NO"}`
+      `   Image Captured: ${response.capturedImage.found ? "YES" : "NO"}`
     );
     if (previewUrl) console.log(`   Preview URL: ${previewUrl}`);
     console.log("🎊".repeat(20) + "\n");
 
     res.json(response);
   } catch (error) {
-    console.error("\n🚨 ERROR in liveness-result endpoint:", error);
+    console.error("\nERROR in liveness-result endpoint:", error);
     console.error("Stack trace:", error.stack);
 
     res.status(500).json({
@@ -470,7 +468,7 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
 // Session creation endpoint
 app.get("/session", async (req, res) => {
   try {
-    console.log("🆕 Creating new liveness session...");
+    console.log("Creating new liveness session...");
     console.log(`S3 Bucket: ${process.env.S3_BUCKET}`);
     console.log(`S3 Prefix: rekognition-output/`);
 
@@ -485,7 +483,7 @@ app.get("/session", async (req, res) => {
 
     const response = await rekognitionClient.send(command);
 
-    console.log(`✅ Liveness session created: ${response.SessionId}`);
+    console.log(`Liveness session created: ${response.SessionId}`);
     console.log(
       `📁 Output will be stored in: s3://${process.env.S3_BUCKET}/rekognition-output/`
     );
@@ -495,7 +493,7 @@ app.get("/session", async (req, res) => {
       success: true,
     });
   } catch (err) {
-    console.error("❌ Error creating liveness session:", err);
+    console.error(" Error creating liveness session:", err);
     res.status(500).json({
       success: false,
       error: err.message,
@@ -506,7 +504,7 @@ app.get("/session", async (req, res) => {
 // Enhanced checkin endpoint with logging and preview
 app.post("/checkin", upload.single("photo"), async (req, res) => {
   try {
-    console.log("\n📸 Manual check-in initiated");
+    console.log("\n Manual check-in initiated");
 
     if (!req.file) {
       return res
@@ -553,7 +551,7 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
       checkedInUsers.add(name);
 
       console.log(
-        `✅ Manual check-in successful: ${name} (${similarity.toFixed(1)}%)`
+        `Manual check-in successful: ${name} (${similarity.toFixed(1)}%)`
       );
 
       res.json({
@@ -567,7 +565,7 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
         },
       });
     } else {
-      console.log("❌ Manual check-in: No matching face found");
+      console.log(" Manual check-in: No matching face found");
       res.json({
         success: false,
         message: "No matching face found in collection",
@@ -579,7 +577,7 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
       });
     }
   } catch (err) {
-    console.error("🚨 Manual check-in error:", err);
+    console.error(" Manual check-in error:", err);
     if (req.file && fs.existsSync(req.file.path)) {
       fs.unlinkSync(req.file.path);
     }
@@ -605,7 +603,7 @@ app.post("/index-face", upload.single("photo"), async (req, res) => {
       })
     );
     console.log(
-      `📤 Image uploaded to S3: s3://${process.env.S3_BUCKET}/${s3Key}`
+      ` Image uploaded to S3: s3://${process.env.S3_BUCKET}/${s3Key}`
     );
 
     // Index face in Rekognition
@@ -702,7 +700,7 @@ app.delete("/delete-face", async (req, res) => {
   }
 });
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📋 Logging enabled for image capture and face recognition`);
-  console.log(`🖼️  Use ?preview=true to get image previews`);
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`Logging enabled for image capture and face recognition`);
+  console.log(` Use ?preview=true to get image previews`);
 });
