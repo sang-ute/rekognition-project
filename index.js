@@ -15,12 +15,14 @@ import {
   IndexFacesCommand,
   DetectFacesCommand,
   CompareFacesCommand,
+  DeleteFacesCommand,
 } from "@aws-sdk/client-rekognition";
 import {
   S3Client,
   GetObjectCommand,
   ListObjectsV2Command,
   PutObjectCommand,
+  DeleteObjectCommand,
 } from "@aws-sdk/client-s3";
 
 dotenv.config();
@@ -170,7 +172,7 @@ async function listS3Objects(bucket, prefix) {
   try {
     console.log(` Listing S3 objects with prefix: s3://${bucket}/${prefix}`);
     let allObjects = [];
-    const prefixes = [prefix, "rekognition-output/", "faces/"]; // Include possible prefixes
+    const prefixes = [prefix, "/", "faces/"]; // Include possible prefixes
     for (const p of prefixes) {
       const params = { Bucket: bucket, Prefix: p, MaxKeys: 100 };
       const result = await s3Client.send(new ListObjectsV2Command(params));
@@ -262,7 +264,7 @@ app.get("/liveness-result/:sessionId", async (req, res) => {
     let previewUrl = null;
 
     try {
-      const s3Prefix = `rekognition-output/${sessionId}/`;
+      const s3Prefix = `${sessionId}/`;
       const s3Objects = await listS3Objects(process.env.S3_BUCKET, s3Prefix);
 
       const referenceImageObj = s3Objects.find((obj) => {
@@ -470,23 +472,20 @@ app.get("/session", async (req, res) => {
   try {
     console.log("Creating new liveness session...");
     console.log(`S3 Bucket: ${process.env.S3_BUCKET}`);
-    console.log(`S3 Prefix: rekognition-output/`);
+    console.log(`S3 Prefix: /`);
 
     const command = new CreateFaceLivenessSessionCommand({
       Settings: {
         OutputConfig: {
           S3Bucket: process.env.S3_BUCKET,
-          S3Prefix: "rekognition-output/",
+          S3Prefix: "/",
         },
       },
     });
 
     const response = await rekognitionClient.send(command);
-
     console.log(`Liveness session created: ${response.SessionId}`);
-    console.log(
-      `📁 Output will be stored in: s3://${process.env.S3_BUCKET}/rekognition-output/`
-    );
+    console.log(`📁 Output will be stored in: s3://${process.env.S3_BUCKET}/`);
 
     res.json({
       sessionId: response.SessionId,
@@ -531,7 +530,7 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
       new SearchFacesByImageCommand({
         CollectionId: process.env.REKOGNITION_COLLECTION,
         Image: { Bytes: photo },
-        FaceMatchThreshold: 70,
+        FaceMatchThreshold: 90,
         MaxFaces: 1,
       })
     );
@@ -588,42 +587,57 @@ app.post("/checkin", upload.single("photo"), async (req, res) => {
 // Index face endpoint with S3 upload
 app.post("/index-face", upload.single("photo"), async (req, res) => {
   try {
-    if (!req.file) return res.status(400).json({ error: "No photo uploaded" });
-    const photo = fs.readFileSync(req.file.path);
-    const externalImageId = `user-${Date.now()}`; // Unique ID
+    const name = req.body.name?.trim();
+    if (!name) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing name field" });
+    }
+    if (!req.file) {
+      return res
+        .status(400)
+        .json({ success: false, error: "Missing photo file" });
+    }
 
-    // Upload to S3
-    const s3Key = `faces/${externalImageId}.jpg`;
+    const photoBuffer = fs.readFileSync(req.file.path);
+    const s3Key = `faces/${Date.now()}_${req.file.originalname}`;
+
     await s3Client.send(
       new PutObjectCommand({
         Bucket: process.env.S3_BUCKET,
         Key: s3Key,
-        Body: photo,
-        ContentType: "image/jpeg",
+        Body: photoBuffer,
+        ContentType: req.file.mimetype,
       })
     );
-    console.log(
-      ` Image uploaded to S3: s3://${process.env.S3_BUCKET}/${s3Key}`
+
+    const safeName = name.replace(/[^a-zA-Z0-9_.\-:]/g, "_");
+    const rekogResult = await rekognitionClient.send(
+      new IndexFacesCommand({
+        CollectionId: process.env.REKOGNITION_COLLECTION,
+        Image: {
+          S3Object: {
+            Bucket: process.env.S3_BUCKET,
+            Name: s3Key,
+          },
+        },
+        DetectionAttributes: ["DEFAULT"],
+        ExternalImageId: safeName,
+      })
     );
 
-    // Index face in Rekognition
-    const command = new IndexFacesCommand({
-      CollectionId: process.env.REKOGNITION_COLLECTION,
-      Image: { Bytes: photo },
-      ExternalImageId: externalImageId,
-    });
-    const result = await rekognitionClient.send(command);
     fs.unlinkSync(req.file.path);
-    console.log(`Face indexed: ${result.FaceRecords[0].Face.FaceId}`);
-    res.json({
-      success: true,
-      faceId: result.FaceRecords[0].Face.FaceId,
-      externalImageId: externalImageId,
-    });
+
+    const faceRecord = rekogResult.FaceRecords?.[0];
+
+    if (!faceRecord) {
+      return res.json({ success: false, message: "No face detected in image" });
+    }
+
+    res.json({ success: true, name });
   } catch (err) {
-    console.error("Error indexing face:", err);
-    if (req.file) fs.unlinkSync(req.file.path);
-    res.status(500).json({ error: err.message });
+    console.error("Error during face indexing:", err);
+    res.status(500).json({ success: false, error: err.message });
   }
 });
 
@@ -634,8 +648,6 @@ app.get("/attendance", (req, res) => {
     checkedIn: Array.from(checkedInUsers),
   });
 });
-// List all faces from Rekognition collection
-// List all faces from Rekognition collection
 app.get("/list-collections", async (req, res) => {
   try {
     const faces = [];
@@ -671,14 +683,17 @@ app.get("/list-collections", async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
-// Delete face from collection and S3
-app.delete("/delete-face", async (req, res) => {
+app.delete("/delete-face", express.json(), async (req, res) => {
   const { faceId, s3Key } = req.body;
-  if (!faceId || !s3Key)
+
+  if (!faceId || !s3Key) {
     return res
       .status(400)
       .json({ success: false, error: "Missing faceId or s3Key" });
+  }
+
   try {
+    // 1. Delete from Rekognition
     await rekognitionClient.send(
       new DeleteFacesCommand({
         CollectionId: process.env.REKOGNITION_COLLECTION,
@@ -686,6 +701,7 @@ app.delete("/delete-face", async (req, res) => {
       })
     );
 
+    // 2. Delete from S3
     await s3Client.send(
       new DeleteObjectCommand({
         Bucket: process.env.S3_BUCKET,
@@ -699,6 +715,7 @@ app.delete("/delete-face", async (req, res) => {
     res.status(500).json({ success: false, error: err.message });
   }
 });
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
   console.log(`Logging enabled for image capture and face recognition`);
