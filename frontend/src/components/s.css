@@ -1,0 +1,76 @@
+/* === Video feed sizing === */
+.amplify-liveness-video-anchor {
+  max-width: 720px;
+  width: 85%;
+}
+
+.amplify-liveness-cancel-button {
+    display: none;
+}
+
+/* === Toaster / Toast behaviour for Amplify warning === */
+.amplify-liveness-start-screen-warning {
+  position: fixed !important;     /* nổi lên trên cùng */
+  top: 16px !important;           /* cách trên 16px */
+  right: 25px !important;         /* đặt ở góc phải */
+  z-index: 2200 !important;       /* cao để không bị che */
+  display: flex !important;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 260px;
+  max-width: calc(100% - 48px);
+  padding: 0.5rem 0.8rem;         /* roomy */
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+  /* giữ màu nền/amplify mặc định (không override màu). nếu Amplify dùng biến: sẽ kế thừa */
+  background-color: white;
+  color: inherit;
+  /* cải thiện accessibility: người dùng đọc được khi xuất hiện */
+  pointer-events: auto;
+  /* animation: vào -> giữ -> ra (tự ẩn) */
+  animation: amplify-toast-in-out 1000s cubic-bezier(.2,.9,.3,1) forwards;
+  /* đảm bảo transform origin ở giữa cho animation mượt */
+  transform-origin: center;
+}
+
+/* optional: nhỏ hơn trên mobile */
+@media (max-width: 480px) {
+  .amplify-liveness-start-screen-warning {
+    left: 12px !important;
+    right: 12px !important;
+    top: 12px !important;
+    min-width: auto;
+    padding: 0.8rem;
+  }
+}
+
+/* icon / message style bên trong (nếu Amplify có cấu trúc con) */
+.amplify-liveness-start-screen-warning .amplify-liveness-popover__container,
+.amplify-liveness-start-screen-warning .amplify-liveness-popover__container {
+  display: flex;
+  align-items: right;
+  gap: 0.6rem;
+  line-height: 1.2;
+  top: 40px!important;
+}
+.amplify-liveness-popover__container{
+  left: -150px!important; /* căn chỉnh với nút */
+  top: 45px!important; /* căn chỉnh với nút */
+}
+
+/* slide/fade animation: vào nhanh, giữ, rồi fade out */
+@keyframes amplify-toast-in-out {
+  0% {
+    opacity: 1;
+  }
+  10% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 1;
+  }
+}
+

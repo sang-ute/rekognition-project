@@ -9,6 +9,8 @@ import {
   Paper,
   Alert,
 } from "@mui/material";
+import axiosInstance from "../config/axios";
+import axios from "axios";
 
 // Mock FaceLivenessDetector
 const FaceLivenessDetector = ({ sessionId, region, onAnalysisComplete, onError }) => {
@@ -91,11 +93,9 @@ function CheckIn() {
       const formData = new FormData();
       formData.append("photo", blob, "checkin.jpg");
 
-      const response = await fetch("/checkin", {
-        method: "POST",
-        body: formData,
-      });
-      const result = await response.json();
+      const response = await axiosInstance.post("/checkin", formData)
+
+      const result = response.data;
 
       setMessage(result.success ? `Check-in successful! Welcome ${result.name}` : result.message || "No match found");
       setCapturedImage(result.capturedImage); // Store captured image data
@@ -111,8 +111,8 @@ function CheckIn() {
     setIsLoading(true);
 
     try {
-      const response = await fetch("/liveness");
-      const data = await response.json();
+      const response = await axios.get("/liveness")
+      const data = await response.data;
 
       if (data.sessionId) {
         setLivenessSessionId(data.sessionId);

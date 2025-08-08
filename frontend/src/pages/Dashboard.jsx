@@ -4,6 +4,7 @@ import {
   Box, Typography, Table, TableBody, TableCell, TableContainer, TableHead,
   TableRow, Paper, Button, CircularProgress, Stack
 } from '@mui/material';
+import axiosInstance from '../config/axios';
 
 function Dashboard() {
   const [faces, setFaces] = useState([]);
@@ -16,14 +17,15 @@ function Dashboard() {
     setLoading(true);
     try {
       const [facesResponse, attendanceResponse] = await Promise.all([
-        fetch('/list-collections'),
-        fetch('/attendance'),
+        axiosInstance.get('/list-collections'),
+        axiosInstance.get('/attendance'),
       ]);
 
-      const facesData = await facesResponse.json();
-      const attendanceData = await attendanceResponse.json();
+      const facesData = await facesResponse.data;
+      const attendanceData = await attendanceResponse.data;
 
       if (facesData.success) {
+        console.log('Faces loaded:', facesData.faces);
         setFaces(facesData.faces);
       } else {
         setError(facesData.error || 'Failed to load faces');

@@ -3,6 +3,8 @@ import { FaceLivenessDetector } from "@aws-amplify/ui-react-liveness";
 import { Loader, ThemeProvider } from "@aws-amplify/ui-react";
 import "@aws-amplify/ui-react/styles.css";
 import { useNavigate } from "react-router-dom";
+import axiosInstance from "../config/axios";
+import "./s.css"; // Import your custom styles
 
 export function LivenessQuickStartReact() {
   const [loading, setLoading] = React.useState(true);
@@ -19,18 +21,13 @@ export function LivenessQuickStartReact() {
     const fetchCreateLiveness = async () => {
       try {
         setLoading(true);
-        const response = await fetch(`${apiBaseUrl}/session`, {
-          method: "GET",
-          headers: {
-            "Content-Type": "application/json",
-          },
-        });
+        const response = await axiosInstance.get("/session");
 
-        if (!response.ok) {
+        if (!response.status || response.status !== 200) {
           throw new Error(`Failed to create liveness session: ${response.status}`);
         }
 
-        const data = await response.json();
+        const data = await response.data;
         console.log("Session data:", data);
         setCreateLivenessApiData(data);
       } catch (error) {
@@ -58,14 +55,13 @@ export function LivenessQuickStartReact() {
 
       console.log("Fetching liveness result from:", url);
 
-      const response = await fetch(url, {
-        method: "GET",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
+      const response = await axiosInstance.get(url);
 
-      const json = await response.json();
+      if (!response.status || response.status !== 200) {
+        throw new Error(`Failed to fetch liveness result: ${response.status}`);
+      }
+
+      const json = await response.data;
       console.log("Analysis results:", json);
 
       // Log detailed information about captured image
@@ -168,27 +164,12 @@ export function LivenessQuickStartReact() {
         <Loader />
       ) : (
         <div style={styles.fullScreen}>
-          {/* Settings Panel */}
-          <div style={styles.settingsPanel}>
-            <label style={styles.settingLabel}>
-              <input
-                type="checkbox"
-                checked={showPreview}
-                onChange={(e) => setShowPreview(e.target.checked)}
-                style={styles.checkbox}
-              />
-              Show captured image preview
-            </label>
-          </div>
-
           <FaceLivenessDetector
             sessionId={createLivenessApiData.sessionId}
             region="us-east-1"
             onAnalysisComplete={handleAnalysisComplete}
             onError={(error) => console.error("Liveness detection error:", error)}
-            components={{
-              PhotosensitiveWarning: () => null,
-            }}
+
             config={{
               faceDistanceThreshold: {
                 min: 0.15,
@@ -331,22 +312,23 @@ const styles = {
     flexDirection: "column",
     alignItems: "center",
     justifyContent: "center",
-    minHeight: "100vh",
+    // minHeight: "100vh",
     padding: "20px",
   },
   fullScreen: {
     width: "100vw",
-    height: "100vh",
+    height: "90vh",
     position: "relative",
   },
   settingsPanel: {
     position: "absolute",
     top: "10px",
-    right: "10px",
+    right: "30px",
     backgroundColor: "rgba(0, 0, 0, 0.7)",
     color: "white",
     padding: "10px",
     borderRadius: "8px",
+    boxSizing: "border-box",
     zIndex: 1000,
   },
   settingLabel: {
