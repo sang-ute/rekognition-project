@@ -15,8 +15,6 @@ export function LivenessQuickStartReact() {
   const [showPreview, setShowPreview] = React.useState(true); // Toggle for image preview
   const navigate = useNavigate();
 
-  const apiBaseUrl = import.meta.env.VITE_API_URL || "http://localhost:3001";
-
   React.useEffect(() => {
     const fetchCreateLiveness = async () => {
       try {
@@ -38,7 +36,7 @@ export function LivenessQuickStartReact() {
     };
 
     fetchCreateLiveness();
-  }, [apiBaseUrl]);
+  }, []);
 
   const handleAnalysisComplete = async () => {
     if (!createLivenessApiData?.sessionId) {
@@ -51,11 +49,13 @@ export function LivenessQuickStartReact() {
 
       // Add preview parameter if enabled
       const previewParam = showPreview ? "?preview=true" : "";
-      const url = `${apiBaseUrl}/liveness-result/${createLivenessApiData.sessionId}${previewParam}`;
+      const url = `/liveness-result/${createLivenessApiData.sessionId}${previewParam}`;
 
       console.log("Fetching liveness result from:", url);
 
       const response = await axiosInstance.get(url);
+
+      console.log("Liveness result response:", response);
 
       if (!response.status || response.status !== 200) {
         throw new Error(`Failed to fetch liveness result: ${response.status}`);

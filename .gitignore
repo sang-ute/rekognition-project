@@ -1,6 +1,9 @@
 node_modules
 .env
 /uploads
+
+dist
+
 # amplify
 node_modules
 .amplify

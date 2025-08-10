@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Link } from 'react-router-dom';
+import { useState } from "react";
+import { Link } from "react-router-dom";
 import {
   Box,
   Button,
@@ -10,17 +10,19 @@ import {
   TextField,
   CircularProgress,
   Fade,
-  FormControl
-} from '@mui/material';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
-import FaceRetouchingNaturalIcon from '@mui/icons-material/FaceRetouchingNatural';
-import { motion } from 'framer-motion';
+  FormControl,
+} from "@mui/material";
+import CloudUploadIcon from "@mui/icons-material/CloudUpload";
+import FaceRetouchingNaturalIcon from "@mui/icons-material/FaceRetouchingNatural";
+import { motion } from "framer-motion";
+import axiosInstance from "../config/axios";
+import { toBase64 } from "../utils/imageToBase64";
 
 function RegisterFaces() {
-  const [name, setName] = useState('');
+  const [name, setName] = useState("");
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState(null);
-  const [message, setMessage] = useState('');
+  const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   const handleFileChange = (event) => {
@@ -35,33 +37,35 @@ function RegisterFaces() {
 
   const handleSubmit = async () => {
     if (!name || !file) {
-      setMessage('Please provide a name and select a photo');
+      setMessage("Please provide a name and select a photo");
       return;
     }
     setIsLoading(true);
-    setMessage('');
+    setMessage("");
 
-    const formData = new FormData();
-    formData.append('name', name);
-    formData.append('photo', file);
+    const fileBase64 = await toBase64(file);
+
+    const payload = {
+      name: name, // tên bạn muốn lưu
+      fileBase64: fileBase64, // base64 của ảnh
+      fileName: file.name, // tên file gốc
+      fileType: file.type, // kiểu mime, vd: "image/jpeg"
+    };
 
     try {
-      const response = await fetch('/index-face', {
-        method: 'POST',
-        body: formData,
-      });
-      const result = await response.json();
+      const response = await axiosInstance.post("/index-face", payload);
+      const result = response.data;
 
       if (result.success) {
         setMessage(`✅ Face registered successfully for ${result.name}`);
-        setName('');
+        setName("");
         setFile(null);
         setPreview(null);
       } else {
-        setMessage(result.error || '❌ No face detected in image');
+        setMessage(result.error || "❌ No face detected in image");
       }
     } catch (err) {
-      setMessage('❌ Error registering face: ' + err.message);
+      setMessage("❌ Error registering face: " + err.message);
     } finally {
       setIsLoading(false);
     }
@@ -74,23 +78,39 @@ function RegisterFaces() {
       justifyContent="center"
       alignItems="center"
       sx={{
-        background: 'linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%)',
-        position: 'relative',
-        overflow: 'hidden',
-        px: 2
+        background: "linear-gradient(135deg, #89f7fe 0%, #66a6ff 100%)",
+        position: "relative",
+        overflow: "hidden",
+        px: 2,
       }}
     >
       {/* Floating blurred blobs */}
-      <Box sx={{
-        position: 'absolute', width: 300, height: 300,
-        background: 'rgba(255,255,255,0.3)', filter: 'blur(100px)',
-        borderRadius: '50%', top: 50, left: -100, zIndex: 0
-      }} />
-      <Box sx={{
-        position: 'absolute', width: 400, height: 400,
-        background: 'rgba(255,255,255,0.15)', filter: 'blur(150px)',
-        borderRadius: '50%', bottom: -50, right: -100, zIndex: 0
-      }} />
+      <Box
+        sx={{
+          position: "absolute",
+          width: 300,
+          height: 300,
+          background: "rgba(255,255,255,0.3)",
+          filter: "blur(100px)",
+          borderRadius: "50%",
+          top: 50,
+          left: -100,
+          zIndex: 0,
+        }}
+      />
+      <Box
+        sx={{
+          position: "absolute",
+          width: 400,
+          height: 400,
+          background: "rgba(255,255,255,0.15)",
+          filter: "blur(150px)",
+          borderRadius: "50%",
+          bottom: -50,
+          right: -100,
+          zIndex: 0,
+        }}
+      />
 
       <motion.div
         initial={{ opacity: 0, y: 40 }}
@@ -104,15 +124,20 @@ function RegisterFaces() {
             maxWidth: 520,
             p: 4,
             borderRadius: 4,
-            bgcolor: 'rgba(255,255,255,0.8)',
-            backdropFilter: 'blur(12px)',
-            boxShadow: '0 8px 32px rgba(0,0,0,0.2)',
+            bgcolor: "rgba(255,255,255,0.8)",
+            backdropFilter: "blur(12px)",
+            boxShadow: "0 8px 32px rgba(0,0,0,0.2)",
           }}
         >
           <CardContent>
             <Stack alignItems="center" spacing={2}>
-              <FaceRetouchingNaturalIcon sx={{ fontSize: 60, color: 'primary.main' }} />
-              <Typography variant="h4" sx={{ fontWeight: 700, letterSpacing: 0.5 }}>
+              <FaceRetouchingNaturalIcon
+                sx={{ fontSize: 60, color: "primary.main" }}
+              />
+              <Typography
+                variant="h4"
+                sx={{ fontWeight: 700, letterSpacing: 0.5 }}
+              >
                 Register New Face
               </Typography>
             </Stack>
@@ -130,31 +155,35 @@ function RegisterFaces() {
               <FormControl>
                 <Box
                   sx={{
-                    border: '2px dashed',
-                    borderColor: 'grey.300',
+                    border: "2px dashed",
+                    borderColor: "grey.300",
                     borderRadius: 3,
                     p: 3,
-                    textAlign: 'center',
-                    cursor: 'pointer',
-                    bgcolor: 'rgba(255,255,255,0.5)',
-                    '&:hover': {
-                      borderColor: 'primary.main',
-                      backgroundColor: 'rgba(255,255,255,0.7)',
-                      transition: 'all 0.3s ease',
+                    textAlign: "center",
+                    cursor: "pointer",
+                    bgcolor: "rgba(255,255,255,0.5)",
+                    "&:hover": {
+                      borderColor: "primary.main",
+                      backgroundColor: "rgba(255,255,255,0.7)",
+                      transition: "all 0.3s ease",
                     },
                   }}
-                  onClick={() => document.getElementById('photo-upload').click()}
+                  onClick={() =>
+                    document.getElementById("photo-upload").click()
+                  }
                 >
-                  <CloudUploadIcon sx={{ fontSize: 40, color: 'primary.main' }} />
+                  <CloudUploadIcon
+                    sx={{ fontSize: 40, color: "primary.main" }}
+                  />
                   <Typography variant="body1" sx={{ mt: 1 }}>
-                    {file ? 'Change Photo' : 'Click or Drag & Drop to Upload'}
+                    {file ? "Change Photo" : "Click or Drag & Drop to Upload"}
                   </Typography>
                   <input
                     id="photo-upload"
                     type="file"
                     accept="image/*"
                     onChange={handleFileChange}
-                    style={{ display: 'none' }}
+                    style={{ display: "none" }}
                   />
                   {preview && (
                     <Box mt={2}>
@@ -162,10 +191,10 @@ function RegisterFaces() {
                         src={preview}
                         alt="preview"
                         style={{
-                          maxWidth: '100%',
+                          maxWidth: "100%",
                           maxHeight: 180,
                           borderRadius: 8,
-                          boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
+                          boxShadow: "0 4px 12px rgba(0,0,0,0.1)",
                         }}
                       />
                     </Box>
@@ -177,9 +206,11 @@ function RegisterFaces() {
                 <Typography
                   variant="body2"
                   sx={{
-                    textAlign: 'center',
+                    textAlign: "center",
                     fontWeight: 500,
-                    color: message.includes('✅') ? 'success.main' : 'error.main',
+                    color: message.includes("✅")
+                      ? "success.main"
+                      : "error.main",
                   }}
                 >
                   {message}
@@ -196,16 +227,20 @@ function RegisterFaces() {
                     px: 4,
                     py: 1.5,
                     fontWeight: 600,
-                    textTransform: 'none',
-                    background: 'linear-gradient(90deg, #4facfe, #00f2fe)',
-                    boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
-                    '&:hover': {
-                      transform: 'translateY(-2px)',
-                      boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
+                    textTransform: "none",
+                    background: "linear-gradient(90deg, #4facfe, #00f2fe)",
+                    boxShadow: "0 4px 14px rgba(0,0,0,0.2)",
+                    "&:hover": {
+                      transform: "translateY(-2px)",
+                      boxShadow: "0 6px 20px rgba(0,0,0,0.3)",
                     },
                   }}
                 >
-                  {isLoading ? <CircularProgress size={24} color="inherit" /> : 'Register'}
+                  {isLoading ? (
+                    <CircularProgress size={24} color="inherit" />
+                  ) : (
+                    "Register"
+                  )}
                 </Button>
                 <Button
                   component={Link}
@@ -215,12 +250,12 @@ function RegisterFaces() {
                     borderRadius: 3,
                     px: 4,
                     py: 1.5,
-                    textTransform: 'none',
+                    textTransform: "none",
                     fontWeight: 600,
                     borderWidth: 2,
-                    '&:hover': {
-                      borderColor: 'primary.main',
-                      backgroundColor: 'rgba(255,255,255,0.4)',
+                    "&:hover": {
+                      borderColor: "primary.main",
+                      backgroundColor: "rgba(255,255,255,0.4)",
                     },
                   }}
                 >
