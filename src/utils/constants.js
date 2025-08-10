@@ -1,0 +1,7 @@
+// src/utils/constants.js
+export const CONSTANTS = {
+  LIVENESS_CONFIDENCE_THRESHOLD: 85,
+  FACE_MATCH_THRESHOLD: 70,
+  MANUAL_CHECKIN_THRESHOLD: 90,
+  PREVIEW_CLEANUP_DELAY: 5 * 60 * 1000, // 5 minutes
+};
