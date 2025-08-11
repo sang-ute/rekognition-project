@@ -22,7 +22,7 @@ router.get("/session", lambdaToExpress(createSessionHandler));
 
 import { handler as getSessionResultsHandler } from "../../amplify/functions/livenessResultFunction/handler.js";
 router.get(
-  "/livetness-result/:sessionId",
+  "/liveness-result/:sessionId",
   validateSessionId,
   lambdaToExpress(getSessionResultsHandler)
 );
